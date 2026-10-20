@@ -275,11 +275,18 @@ def unwrap(value):
 
 
 def project(value):
+    if value is None:
+        return value
+    value_type = type(value)
+    if value_type is int or value_type is float or value_type is bool or value_type is str:
+        return value
     if isinstance(value, (_Payload, ReadonlySequence, ReadonlyMap)):
         return value
-    if isinstance(value, bp.v1001.Vec3):
-        from .types import Vec3
+    from .types import Vec3
 
+    if value_type is Vec3:
+        return value
+    if isinstance(value, bp.v1001.Vec3):
         return Vec3(value.x, value.y, value.z)
     if isinstance(value, Enum) and type(value).__module__.startswith("bedrock_protocol"):
         return int(value.value)

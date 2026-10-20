@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bedrock-bot"
+version = "0.2.0.dev0"
+description = "Typed asynchronous Bedrock bots over NetherNet"
+requires-python = ">=3.12"
+dependencies = [
+    "bedrock-protocol==0.5.0.dev0",
+    "nethernet[http]==0.0.2.dev0",
+    "cryptography==50.0.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bedrock_bot"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+extend-select = ["I", "F"]

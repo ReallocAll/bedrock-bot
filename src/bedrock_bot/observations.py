@@ -128,7 +128,7 @@ class Statistics(Record):
     probes_sent: int = 0
     probes_lost: int = 0
     decode_errors: int = 0
-    connected_bytes_sent: int = 0
-    connected_bytes_received: int = 0
+    connected_bytes_sent: int | None = None
+    connected_bytes_received: int | None = None
     packet_counts_in: ReadonlySequence[int] = field(default_factory=lambda: ReadonlySequence((0,) * 1024))
     packet_counts_out: ReadonlySequence[int] = field(default_factory=lambda: ReadonlySequence((0,) * 1024))

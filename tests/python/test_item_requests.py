@@ -170,7 +170,7 @@ async def test_move_prevalidation_consumes_no_id_or_wire(monkeypatch, version):
 @pytest.mark.parametrize("version", [1001, 2193])
 async def test_submission_boundary_and_queued_cancellation_preserve_ids(monkeypatch, version):
     async with scene(monkeypatch, version) as (bot, peer, _):
-        peer.capacity.clear()
+        peer.pause_sender(bot)
         cancelled = bot.begin_move_item(bot.player_slot(9), bot.player_slot(0), 3)
         assert cancelled.phase == api.ItemOperationPhase.queued
         await deliver(bot, peer, response_packet(peer.p, rows=[(29, 9, 7, 101), (28, 0, 3, 201)]))
@@ -183,7 +183,7 @@ async def test_submission_boundary_and_queued_cancellation_preserve_ids(monkeypa
         assert operation.key.request_id == -3
         observed = []
         peer.before_send = lambda: observed.append(operation.phase)
-        peer.capacity.set()
+        peer.resume_sender()
         await sent(peer)
         peer.before_send = None
         assert observed and all(phase == api.ItemOperationPhase.submitted for phase in observed)
@@ -282,7 +282,7 @@ async def test_only_post_submission_authority_can_fill_missing_response(monkeypa
     async with scene(monkeypatch, version) as (bot, peer, _):
         queued = authority.startswith("queued")
         if queued:
-            peer.capacity.clear()
+            peer.pause_sender(bot)
         operation = bot.begin_move_item(bot.player_slot(9), bot.player_slot(0), 3)
         if not queued:
             await sent(peer)
@@ -301,7 +301,7 @@ async def test_only_post_submission_authority_can_fill_missing_response(monkeypa
             await deliver(bot, peer, inventory_packet(p, slots))
         if queued:
             assert operation.phase == api.ItemOperationPhase.queued
-            peer.capacity.set()
+            peer.resume_sender()
             await sent(peer)
         rows = [(29, 9, 7, 101), (28, 0, 3, 201)] if authority == "queued_matching_id" else []
         peer.send(response_packet(p, rows=rows, absent=not rows))

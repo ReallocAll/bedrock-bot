@@ -98,7 +98,7 @@ async def test_session_opener_identity_is_the_login_identity_and_refreshes_on_re
         identities.append(identity)
         peer = Peer(options.protocol)
         peers.append(peer)
-        return peer
+        return peer.connection
 
     monkeypatch.setattr(transport, "_open_connection", open_connection)
     async with api.Runtime() as runtime:
@@ -144,7 +144,7 @@ async def test_identity_is_created_after_long_start_delay(monkeypatch, cancel_be
         identities.append(identity)
         peer = Peer(options.protocol)
         peers.append(peer)
-        return peer
+        return peer.connection
 
     monkeypatch.setattr(auth, "time", SimpleNamespace(time=lambda: now))
     monkeypatch.setattr(session, "create_identity", timed_identity)

@@ -1,4 +1,4 @@
-"""The private whole-message boundary used by the session's single sender."""
+"""Public NetherNet connection setup and application queue limits."""
 
 import hmac
 from typing import TYPE_CHECKING
@@ -18,11 +18,15 @@ async def _open_connection(options: "BotOptions", identity: "Identity") -> "Conn
     if not options.server_key_sha256:
         raise ValueError("a server identity key pin is required")
 
-    from nethernet import ConnectionLimits, InvalidIdentity, connect_http
-    from nethernet.identity import build_envelope, sign_fingerprints
+    from aiortc import RTCIceServer
+    from nethernet import IdentitySigner, InvalidIdentity, connect_http
+    from nethernet.identity import build_envelope, insert_identity, sign_fingerprints
 
-    def sign_offer(offer: str) -> str:
-        return build_envelope("offline.endstone.invalid", identity.token, sign_fingerprints(offer, identity.key))
+    class BotIdentitySigner(IdentitySigner):
+        def sign(self, sdp: str) -> str:
+            return insert_identity(
+                sdp, build_envelope("offline.endstone.invalid", identity.token, sign_fingerprints(sdp, identity.key))
+            )
 
     def verify_server(server_identity) -> None:
         if not hmac.compare_digest(server_identity.key_digest, options.server_key_sha256):
@@ -31,10 +35,9 @@ async def _open_connection(options: "BotOptions", identity: "Identity") -> "Conn
     timeout = options.connect_timeout_ms / 1000
     return await connect_http(
         options.server_url,
-        ice_servers=[],
-        limits=ConnectionLimits(max_message_size=MAX_WIRE_MESSAGE),
+        ice_servers=[RTCIceServer(urls=[])],
         negotiation_timeout=timeout,
         timeout=timeout,
-        sign_offer=sign_offer,
+        identity_signer=BotIdentitySigner(identity.key, domain="offline.endstone.invalid"),
         on_server_identity=verify_server,
     )

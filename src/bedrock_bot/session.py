@@ -262,6 +262,9 @@ class Session:
                     if self.runtime._suppressed:
                         self.runtime._background_failure(error)
                     self.error = error
+            for command in self.queue:
+                if isinstance(command, _Boundary) and not command.future.done():
+                    command.future.cancel()
             self.queue.clear()
             self.queue_bytes = self.queue_packets = 0
             self.actors.clear()
@@ -297,7 +300,11 @@ class Session:
     def enqueue(self, packet, *, operation=None, valid=None):
         if not self.usable():
             raise RuntimeError("session is closing")
-        size = len(self.codec.encode_packet(packet)) + 5
+        try:
+            size = len(self.codec.encode_packet(packet)) + 5
+        except BaseException as error:
+            self.fail(error)
+            raise
         if self.queue_packets >= transport.COMMAND_PACKETS or size > transport.COMMAND_BYTES - self.queue_bytes:
             error = RuntimeError("outbound queue limit exceeded")
             self.fail(error)
@@ -336,31 +343,27 @@ class Session:
                     if isinstance(command, _Boundary):
                         break
                     commands.append(command)
-                permit = await self.connection.reserve_send(transport.MAX_WIRE_MESSAGE)
-                try:
-                    if not self.usable():
-                        return
-                    valid = [command for command in commands if self.command_valid(command)]
-                    if valid:
-                        wire = self.batch.encode([command.packet for command in valid])
-                        for command in valid:
-                            if command.operation is not None:
-                                self.item_authority.clear()
-                                command.operation._submit()
-                                self.operation_deadline = (
-                                    self.runtime._loop.time() + self.options.item_request_timeout_ms / 1000
-                                )
-                        permit.send_nowait(wire)
-                        self.stats["batch_bytes_out"] += len(wire)
-                        self.stats["packets_out"] += len(valid)
-                        for command in valid:
-                            self.packet_counts_out[command.packet.packet_id] += 1
-                    for command in commands:
-                        assert self.queue.popleft() is command
-                        self.queue_bytes -= command.size
-                        self.queue_packets -= 1
-                finally:
-                    permit.release()
+                valid = [command for command in commands if self.command_valid(command)]
+                if valid:
+                    wire = self.batch.encode([command.packet for command in valid])
+                    if len(wire) > transport.MAX_WIRE_MESSAGE:
+                        raise ValueError("outbound wire message limit exceeded")
+                    for command in valid:
+                        if command.operation is not None:
+                            self.item_authority.clear()
+                            command.operation._submit()
+                            self.operation_deadline = (
+                                self.runtime._loop.time() + self.options.item_request_timeout_ms / 1000
+                            )
+                    await self.connection.send(wire)
+                    self.stats["batch_bytes_out"] += len(wire)
+                    self.stats["packets_out"] += len(valid)
+                    for command in valid:
+                        self.packet_counts_out[command.packet.packet_id] += 1
+                for command in commands:
+                    assert self.queue.popleft() is command
+                    self.queue_bytes -= command.size
+                    self.queue_packets -= 1
 
     async def reader(self):
         while self.usable():
@@ -368,6 +371,8 @@ class Session:
             if not self.usable():
                 return
             self.stats["batch_bytes_in"] += len(data)
+            if len(data) > transport.MAX_WIRE_MESSAGE:
+                raise ValueError("inbound wire message limit exceeded")
             try:
                 batch = self.batch.decode(data, packet_ids=REQUIRED_IDS)
             except bp.ProtocolError:

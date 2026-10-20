@@ -1,12 +1,16 @@
 import asyncio
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import nethernet
 import pytest
+from aiortc import RTCIceServer
 from nethernet.identity import cpk_digest, verify_fingerprints
 
 from bedrock_bot import transport
+from bedrock_bot.auth import create_identity
 
 
 def options(url, pin):
@@ -22,16 +26,15 @@ async def test_missing_pin_rejects_before_transport_io(monkeypatch):
 
 
 async def test_adapter_signs_session_identity_and_verifies_pinned_server():
-    key = nethernet.generate_operator_key()
     server_key = nethernet.generate_operator_key()
-    identity = SimpleNamespace(key=key, token="local-test-token")
+    identity = create_identity("signed test", "00000000-0000-0000-0000-000000000001")
     signer = nethernet.IdentitySigner(server_key, domain="test.example")
     offers = []
 
     def validate(offer):
         assert offer.identity.domain == "offline.endstone.invalid"
         assert offer.identity.token == identity.token
-        verify_fingerprints(offer.sdp, offer.identity.fingerprints, key.public_key())
+        verify_fingerprints(offer.sdp, offer.identity.fingerprints, identity.key.public_key())
         offers.append(offer)
 
     async def echo(conn):
@@ -41,8 +44,7 @@ async def test_adapter_signs_session_identity_and_verifies_pinned_server():
     async with nethernet.serve_http(
         echo,
         host="127.0.0.1",
-        ice_servers=[],
-        limits=nethernet.ConnectionLimits(),
+        ice_servers=[RTCIceServer(urls=[])],
         identity_signer=signer,
         validate_offer=validate,
     ) as server:
@@ -51,15 +53,11 @@ async def test_adapter_signs_session_identity_and_verifies_pinned_server():
             identity,
         )
         try:
-            held = await conn.reserve_send(transport.MAX_WIRE_MESSAGE)
-            held.release()
-            held.release()
             payload = b"\x01wire-without-raknet-prefix" * 12000
-            permit = await conn.reserve_send(len(payload))
-            permit.send_nowait(payload)
-            permit.release()
+            await conn.send(payload)
             assert await asyncio.wait_for(conn.recv(), 5) == payload
         finally:
+            await conn.close()
             await conn.close()
         assert await conn.wait_closed() == nethernet.SessionError.NONE
     assert len(offers) == 1
@@ -78,8 +76,7 @@ async def test_adapter_rejects_missing_or_unpinned_server_identity(assertion):
     async with nethernet.serve_http(
         handler,
         host="127.0.0.1",
-        ice_servers=[],
-        limits=nethernet.ConnectionLimits(),
+        ice_servers=[RTCIceServer(urls=[])],
         identity_signer=signer,
     ) as server:
         with pytest.raises(nethernet.InvalidIdentity):
@@ -89,38 +86,73 @@ async def test_adapter_rejects_missing_or_unpinned_server_identity(assertion):
             )
 
 
-async def test_actual_adapter_close_joins_while_udp_is_paused_without_resume():
-    key = nethernet.generate_operator_key()
-    identity = SimpleNamespace(key=key, token="local-test-token")
-    signer = nethernet.IdentitySigner(key, domain="test.example")
+async def test_adapter_cancellation_during_pending_http_signaling():
+    from aiohttp import web
 
-    async def handler(conn):
-        await conn.wait_closed()
+    entered, release = asyncio.Event(), asyncio.Event()
 
-    async with nethernet.serve_http(
-        handler,
-        host="127.0.0.1",
-        ice_servers=[],
-        limits=nethernet.ConnectionLimits(),
-        identity_signer=signer,
-    ) as server:
-        conn = await transport._open_connection(
-            options(f"http://127.0.0.1:{server.bound_port}", cpk_digest(key.public_key())),
-            identity,
-        )
-        sctp = conn._session._pc._pc.sctp
-        ice = sctp.transport.transport._connection
-        protocol = next(iter(ice._nominated.values())).protocol
-        protocol.pause_writing()
+    async def pending(request):
+        entered.set()
+        await release.wait()
+        return web.Response(status=503)
+
+    async def capability(request):
+        return web.Response(status=200, text="1")
+
+    app = web.Application()
+    app.router.add_get("/v1/join", capability)
+    app.router.add_post("/v1/join/{network_id}", pending)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = int(runner.addresses[0][1])
+        identity = create_identity("cancel test", "00000000-0000-0000-0000-000000000001")
+        task = asyncio.create_task(transport._open_connection(options(f"http://127.0.0.1:{port}", "0" * 64), identity))
         try:
-            await conn.send(b"waiting for UDP capacity")
-            await asyncio.sleep(0)
-            assert conn.state == nethernet.SessionState.CONNECTED
-            await asyncio.wait_for(conn.close(), 2)
-            assert await conn.wait_closed() == nethernet.SessionError.NONE
-            assert not ice._protocols
-            assert not sctp._service_tasks
-            assert sctp._send_bytes == 0
+            await asyncio.wait_for(entered.wait(), 3)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
         finally:
-            protocol.resume_writing()
-            await conn.close()
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    finally:
+        await runner.cleanup()
+
+
+def test_official_connection_process_exits_after_repeated_close():
+    code = """
+import asyncio
+import sys
+from types import SimpleNamespace
+import nethernet
+from aiortc import RTCIceServer
+from nethernet.identity import cpk_digest
+from bedrock_bot import transport
+from bedrock_bot.auth import create_identity
+async def main():
+    key = nethernet.generate_operator_key()
+    async def echo(conn):
+        async for data in conn:
+            await conn.send(data)
+    signer = nethernet.IdentitySigner(key, domain="exit.example")
+    async with nethernet.serve_http(
+        echo, host="127.0.0.1", ice_servers=[RTCIceServer(urls=[])], identity_signer=signer
+    ) as server:
+        options = SimpleNamespace(server_url=f"http://127.0.0.1:{server.bound_port}",
+                                  server_key_sha256=cpk_digest(key.public_key()), connect_timeout_ms=3000)
+        identity = create_identity("exit test", "00000000-0000-0000-0000-000000000001")
+        conn = await transport._open_connection(options, identity)
+        payload = b"fragmented-exit" * 2000
+        await conn.send(payload)
+        assert await asyncio.wait_for(conn.recv(), 5) == payload
+        await conn.close()
+        await conn.close()
+asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None)
+"""
+    result = subprocess.run([sys.executable, "-I", "-c", code], check=False, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr

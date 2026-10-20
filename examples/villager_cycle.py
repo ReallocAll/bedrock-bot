@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import math
+import sys
 from pathlib import Path
 
 from first_trade import (
@@ -365,7 +366,7 @@ async def run(args):
 
 
 def main(argv=None):
-    asyncio.run(run(parse_args(argv)))
+    asyncio.run(run(parse_args(argv)), loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None)
 
 
 if __name__ == "__main__":

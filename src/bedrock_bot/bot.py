@@ -184,11 +184,8 @@ class Bot:
         session = self._session
         if session is None:
             return Statistics()
-        counts = None if session.connection is None else session.connection.get_dtls_byte_counts()
         return Statistics(
             **session.stats,
-            connected_bytes_sent=0 if counts is None else counts.bytes_sent,
-            connected_bytes_received=0 if counts is None else counts.bytes_received,
             packet_counts_in=session.packet_counts_in,
             packet_counts_out=session.packet_counts_out,
         )

@@ -36,15 +36,10 @@ proof of the original bytes received from the peer.
 
 # Statistics
 
-`capture_statistics()` samples the current connection's synchronous
-`get_dtls_byte_counts()` accessor. `connected_bytes_sent` and
-`connected_bytes_received` count cumulative bytes at the DTLS ICE-facing
-boundary, including handshake, SCTP, and retransmissions. They exclude HTTP
-signaling, UDP/IP headers, and ICE/STUN/TURN overhead. They are not batch-byte or
-queue-occupancy estimates. Final closed-state callbacks occur after awaited
-transport close; captures retain their values, and a new connection starts new
-counters. Attempts that fail before returning a Connection do not provide
-complete attempt-traffic statistics.
+`connected_bytes_sent` and `connected_bytes_received` are optional integers.
+Both remain `None` in every state because official NetherNet exposes no DTLS
+byte counters. Application batch and packet counters remain available. Captures
+retain their values, and reconnect starts new application counters.
 
 `batch_bytes_in` counts received batch bytes before decoding, including malformed
 batches. Each successfully decoded batch counts all its headers, including
@@ -53,8 +48,32 @@ unknown, unselected, and subclient-filtered packets, in `packets_in` and the
 `decode_errors` and counts its input bytes, but contributes **no packets or partial
 histogram prefix**. This intentionally replaces legacy partial-prefix accounting.
 A later Python business-validation failure retains the already counted headers.
-Outbound bytes, packets, and `packet_counts_out` advance only after synchronous
-send acceptance, independently of the operation's submitted phase.
+Outbound bytes, packets, and `packet_counts_out` advance only after awaited
+`Connection.send()` returns, independently of the operation's submitted phase.
+
+# Transport and lifetime
+
+The pinned official NetherNet verifier requires the server JWT's `cpk` to be a
+base64 DER string. It rejects a JWK object before cryptographic verification or
+the pin callback. The required live BDS check returned a JWK `cpk`, blocking this
+migration candidate before login. That assertion's signature and gameplay remain
+unverified; identity verification and mandatory pinning stay enabled.
+
+The application queue accepts at most 4096 packets and 4 MiB of estimated encoded
+data, including a batch being submitted. Commands are revalidated before batch
+encoding. An encoding or send failure ends the session; failure or cancellation
+after an item request is submitted leaves its outcome indeterminate. Never retry
+an indeterminate transaction automatically.
+
+Complete wire messages are limited to 32 MiB plus 1 KiB in each direction. The
+receive check runs after upstream reassembly. These application limits do not
+bound transport backlog or reassembly memory. Official `Connection.send()`
+currently provides no capacity wait or atomic fragment reservation.
+
+The adapter uses host ICE candidates through public configuration. Session
+cleanup joins its reader, sender, ticker and connection attempt, resolves queued
+boundaries and operations, and awaits public connection close. Runtime exit waits
+for this bot-owned cleanup; a cancelled close waiter does not cancel it.
 
 # Direct asyncio scenarios
 

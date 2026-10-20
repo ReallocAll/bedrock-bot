@@ -9,15 +9,20 @@ description = "Typed asynchronous Bedrock bots over NetherNet"
 requires-python = ">=3.12"
 dependencies = [
     "bedrock-protocol==0.5.0.dev0",
-    "nethernet[http]==0.0.2.dev0",
+    "nethernet[http] @ git+https://github.com/EndstoneMC/nethernet-python.git@695095c7d853e56fd60076bfe6db9fab6714e88b",
+    "aiortc==1.15.0",
+    "aioice==0.10.2",
     "cryptography==50.0.2",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-asyncio>=1"]
+test = ["pytest>=8", "pytest-asyncio>=1.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bedrock_bot"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

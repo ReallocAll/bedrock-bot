@@ -40,13 +40,12 @@ async def test_new_window_settles_player_move_before_container_callback(monkeypa
     async with scene(monkeypatch, version, callback=callback) as (bot, peer, events):
         await prepare_window_trigger(bot, peer)
         if phase == "queued":
-            peer.capacity.clear()
+            peer.pause_sender(bot)
         operation = bot.begin_move_item(bot.player_slot(9), bot.player_slot(0), 3)
         assert operation.key.window is None
         if phase == "submitted":
             await sent(peer)
         else:
-            await peer.reserving.wait()
             assert operation.phase == api.ItemOperationPhase.queued
             assert not requests(peer)
         events.clear()
@@ -68,7 +67,7 @@ async def test_new_window_settles_player_move_before_container_callback(monkeypa
         assert [slot.state for slot in retained.touched_slots] == expected_states
         assert [slot.slot.index for slot in retained.touched_slots] == [9, 0]
         assert bot.get_item(bot.player_slot(20)).count == 6
-        peer.capacity.set()
+        peer.resume_sender()
         probes = sum(packet.packet_id == 115 for packet in peer.received)
         bot.probe_latency()
         await until(lambda: sum(packet.packet_id == 115 for packet in peer.received) == probes + 1)

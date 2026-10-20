@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sys
 from collections.abc import Awaitable, Callable
 
 from .events import DEFAULT_EVENTS, event_mask, validate_mask
@@ -26,7 +27,12 @@ class Runtime:
     async def __aenter__(self) -> Runtime:
         if self._loop is not None or self._exited:
             raise RuntimeError("Runtime cannot be entered twice")
-        self._loop = asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
+        if sys.platform == "win32" and isinstance(loop, asyncio.ProactorEventLoop):
+            raise RuntimeError(
+                "Windows requires SelectorEventLoop; use asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)"
+            )
+        self._loop = loop
         self._stop_event = asyncio.Event()
         self._lifetime = self._loop.create_task(self._run(), name="bedrock-runtime")
         return self

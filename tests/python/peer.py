@@ -6,12 +6,12 @@ import hashlib
 import json
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 
 import bedrock_protocol as bp
 from bedrock_protocol.wire import BatchCodec, Compression
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
-from nethernet import DtlsByteCounts
 
 
 def unbase(value):
@@ -48,25 +48,6 @@ def offer(public):
     return jwt, hashlib.sha256(salt + key.exchange(ec.ECDH(), remote)).digest()
 
 
-class Permit:
-    def __init__(self, peer):
-        self.peer = peer
-        self.used = False
-
-    def send_nowait(self, data):
-        assert not self.used
-        self.used = True
-        if self.peer.before_send:
-            self.peer.before_send()
-        if self.peer.send_error:
-            raise self.peer.send_error
-        self.peer.received_wire.append(data)
-        self.peer.accept(data)
-
-    def release(self):
-        self.peer.released += 1
-
-
 class Peer:
     def __init__(self, version=2193, *, automatic=True, server_handshake=True, compression_threshold=1):
         self.version = version
@@ -74,11 +55,8 @@ class Peer:
         self.codec = bp.Codec(version)
         self.batch = BatchCodec(self.codec)
         self.incoming = asyncio.Queue()
-        self.capacity = asyncio.Event()
-        self.capacity.set()
         self.close_gate = asyncio.Event()
         self.close_gate.set()
-        self.reserving = asyncio.Event()
         self.closing = asyncio.Event()
         self.closed = False
         self.automatic = automatic
@@ -87,28 +65,37 @@ class Peer:
         self.received = []
         self.received_wire = []
         self.login = None
-        self.released = 0
         self.before_send = None
-        self.after_reserve = None
         self.send_error = None
-        self.dtls_byte_counts = DtlsByteCounts(0, 0)
+        self.connection = SimpleNamespace(send=self.send_bytes, recv=self.recv, close=self.close)
+        self._sender_event = None
 
-    def get_dtls_byte_counts(self):
-        return self.dtls_byte_counts
+    def pause_sender(self, bot):
+        event = bot._session.send_event
+        event.clear()
+        self._sender_event = event
+        self._wake_sender = event.set
+        event.set = lambda: None
+
+    def resume_sender(self):
+        if self._sender_event is not None:
+            self._sender_event.set = self._wake_sender
+            self._wake_sender()
+            self._sender_event = None
 
     async def recv(self):
         return await self.incoming.get()
 
-    async def reserve_send(self, bound):
-        assert bound == 33555456
-        self.reserving.set()
-        await self.capacity.wait()
-        permit = Permit(self)
-        if self.after_reserve:
-            self.after_reserve()
-        return permit
+    async def send_bytes(self, data):
+        if self.before_send:
+            self.before_send()
+        if self.send_error:
+            raise self.send_error
+        self.received_wire.append(data)
+        self.accept(data)
 
     async def close(self):
+        self.resume_sender()
         self.closing.set()
         await self.close_gate.wait()
         self.closed = True
@@ -185,7 +172,7 @@ class Peers:
             compression_threshold=self.compression_threshold,
         )
         self.connections.append(peer)
-        return peer
+        return peer.connection
 
 
 async def until(predicate, timeout=2):

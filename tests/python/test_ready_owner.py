@@ -1,4 +1,5 @@
 import asyncio
+import sys
 
 import pytest
 from peer import Peer
@@ -13,7 +14,7 @@ async def test_ready_coroutine_rejects_foreign_consuming_loop(monkeypatch, pendi
 
     async def open_connection(options, identity):
         await dial.wait()
-        return Peer(options.protocol)
+        return Peer(options.protocol).connection
 
     monkeypatch.setattr(transport, "_open_connection", open_connection)
     async with api.Runtime() as runtime:
@@ -26,7 +27,7 @@ async def test_ready_coroutine_rejects_foreign_consuming_loop(monkeypatch, pendi
 
         def consume():
             try:
-                asyncio.run(waiter)
+                asyncio.run(waiter, loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None)
             except BaseException as error:
                 return error
             return None

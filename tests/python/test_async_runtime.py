@@ -1,6 +1,5 @@
 import asyncio
 import dataclasses
-import os
 import subprocess
 import sys
 import threading
@@ -102,17 +101,15 @@ async def test_no_listener_state_input_and_scoped_interaction(monkeypatch, versi
             bot.get_item(old_slot)
 
 
-@pytest.mark.parametrize("when", ["before_capacity", "after_capacity", "submitted"])
+@pytest.mark.parametrize("when", ["queued", "submitted"])
 async def test_operation_commit_cancel_and_wait_independence(monkeypatch, when):
     peers = Peers(monkeypatch)
     async with api.Runtime() as runtime:
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer", item_request_timeout_ms=100))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
-        peer.capacity.clear()
-        peer.reserving.clear()
+        peer.pause_sender(bot)
         operation = submit(bot)
-        await peer.reserving.wait()
         assert operation.phase == api.ItemOperationPhase.queued
         with pytest.raises(TimeoutError):
             await operation.wait(0.01)
@@ -121,10 +118,8 @@ async def test_operation_commit_cancel_and_wait_independence(monkeypatch, when):
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
-        if when == "before_capacity":
+        if when == "queued":
             assert bot.cancel_item_operation(operation) == api.ItemCancellation.cancelled
-        elif when == "after_capacity":
-            peer.after_reserve = lambda: bot.cancel_item_operation(operation)
         else:
 
             def at_commit():
@@ -132,7 +127,7 @@ async def test_operation_commit_cancel_and_wait_independence(monkeypatch, when):
                 peer.before_send = None
 
             peer.before_send = at_commit
-        peer.capacity.set()
+        peer.resume_sender()
         result = await operation.wait(2)
         assert result.outcome == (
             api.ItemRequestOutcome.indeterminate if when == "submitted" else api.ItemRequestOutcome.cancelled
@@ -181,7 +176,7 @@ async def test_callback_failure_identity_and_operation_result(monkeypatch):
     async with api.Runtime(callback) as runtime:
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
         await bot.wait_ready(2)
-        peers.connections[-1].capacity.clear()
+        peers.connections[-1].pause_sender(bot)
         operation = submit(bot)
         with pytest.raises(ValueError) as caught:
             bot.cancel_item_operation(operation)
@@ -293,7 +288,7 @@ async def test_nested_caught_callback_failure_not_resurrected(monkeypatch):
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
-        peer.capacity.clear()
+        peer.pause_sender(bot)
         operation = submit(bot)
         peer.send(peer.p.SetHealthPacket(health=19), peer.p.SetHealthPacket(health=18))
         await asyncio.wait_for(runtime.wait_closed(), 2)
@@ -309,7 +304,7 @@ async def test_pending_shutdown_and_thread_read_result(monkeypatch, submitted):
         await bot.wait_ready(2)
         peer = peers.connections[-1]
         if not submitted:
-            peer.capacity.clear()
+            peer.pause_sender(bot)
         operation = submit(bot)
         if submitted:
             await until(lambda: operation.phase == api.ItemOperationPhase.submitted)
@@ -618,7 +613,7 @@ async def test_queue_limits_fail_visibly_and_bound_typed_payload(monkeypatch):
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
-        peer.capacity.clear()
+        peer.pause_sender(bot)
         with pytest.raises(RuntimeError, match="queue limit"):
             for _ in range(4097):
                 bot.request_chunk_radius(8)
@@ -626,17 +621,15 @@ async def test_queue_limits_fail_visibly_and_bound_typed_payload(monkeypatch):
         assert bot.get_status().state == api.BotState.failed
 
 
-async def test_backpressure_discards_frame_invalidated_by_correction(monkeypatch):
+async def test_sender_discards_queued_frame_invalidated_by_correction(monkeypatch):
     peers = Peers(monkeypatch)
     async with api.Runtime() as runtime:
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
         p = peer.p
-        peer.capacity.clear()
-        peer.reserving.clear()
+        peer.pause_sender(bot)
         bot.set_input(api.Input(position=api.Vec3(99, 99, 99)))
-        await peer.reserving.wait()
         peer.send(
             p.CorrectPlayerMovePredictionPacket(
                 prediction_type=p.RewindType.PLAYER,
@@ -649,7 +642,7 @@ async def test_backpressure_discards_frame_invalidated_by_correction(monkeypatch
             )
         )
         await until(lambda: bot.capture_statistics().corrections == 1)
-        peer.capacity.set()
+        peer.resume_sender()
         await until(lambda: any(x.packet_id == 144 for x in peer.received))
         assert all(x.pos.x != 99 for x in peer.received if x.packet_id == 144)
 
@@ -659,8 +652,9 @@ def test_process_exits_within_twenty_seconds():
 import asyncio
 from bedrock_bot import Runtime, BotOptions
 from bedrock_bot import transport
-from peer import Peer
-async def open(options, identity): return Peer()
+import runpy, sys
+Peer = runpy.run_path(sys.argv[1])["Peer"]
+async def open(options, identity): return Peer().connection
 transport._open_connection = open
 async def main():
     async with Runtime() as runtime:
@@ -670,11 +664,14 @@ async def main():
         await bot.reconnect()
         await bot.wait_ready(2)
         await bot.disconnect()
-asyncio.run(main())
+asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None)
 """
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([os.path.dirname(__file__), env.get("PYTHONPATH", "")])
-    result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=20)
+    from pathlib import Path
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code, str(Path(__file__).with_name("peer.py"))],
+        capture_output=True, text=True, timeout=20,
+    )
     assert result.returncode == 0, result.stderr
     assert not result.stderr
 
@@ -792,11 +789,11 @@ async def test_operation_timeout_starts_only_at_submission(monkeypatch):
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer", item_request_timeout_ms=30))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
-        peer.capacity.clear()
+        peer.pause_sender(bot)
         operation = submit(bot)
         await asyncio.sleep(0.12)
         assert operation.phase == api.ItemOperationPhase.queued and operation.result is None
-        peer.capacity.set()
+        peer.resume_sender()
         result = await operation.wait(2)
         assert result.outcome == api.ItemRequestOutcome.indeterminate
 
@@ -910,7 +907,7 @@ async def test_review_timeout_unwind_is_joined_without_second_cancellation(monke
         nonlocal calls
         calls += 1
         if calls > 1:
-            return Peer()
+            return Peer().connection
         try:
             await asyncio.Future()
         finally:
@@ -1158,7 +1155,7 @@ async def test_wait_ready_interrupted_waiter_preserves_later_result(monkeypatch,
         await release.wait()
         if outcome == "error":
             raise error
-        return Peer()
+        return Peer().connection
 
     monkeypatch.setattr(transport, "_open_connection", open_connection)
     loop = asyncio.get_running_loop()

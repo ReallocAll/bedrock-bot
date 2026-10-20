@@ -7,6 +7,7 @@ import asyncio
 import json
 import math
 import re
+import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -429,7 +430,7 @@ async def run(args):
 
 
 def main(argv=None):
-    asyncio.run(run(parse_args(argv)))
+    asyncio.run(run(parse_args(argv)), loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None)
 
 
 if __name__ == "__main__":

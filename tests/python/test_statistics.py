@@ -4,6 +4,7 @@ import dataclasses
 import bedrock_protocol as bp
 import nethernet
 import pytest
+from aiortc import RTCIceServer
 from peer import Peers, until
 
 import bedrock_bot as api
@@ -76,7 +77,7 @@ async def test_malformed_native_batch_counts_bytes_but_no_partial_histogram(monk
         assert bot.get_status().state == api.BotState.failed
 
 
-async def test_connected_snapshot_samples_close_and_new_connection(monkeypatch):
+async def test_unavailable_transport_counters_remain_none_across_lifecycle(monkeypatch):
     peers = Peers(monkeypatch)
     closed = []
 
@@ -86,26 +87,27 @@ async def test_connected_snapshot_samples_close_and_new_connection(monkeypatch):
 
     async with api.Runtime(callback) as runtime:
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
+        assert bot.capture_statistics().connected_bytes_sent is None
+        assert bot.capture_statistics().connected_bytes_received is None
         await bot.wait_ready(2)
         peer = peers.connections[-1]
-        peer.dtls_byte_counts = nethernet.DtlsByteCounts(1234, 5678)
         captured = bot.capture_statistics()
-        assert (captured.connected_bytes_sent, captured.connected_bytes_received) == (1234, 5678)
+        assert (captured.connected_bytes_sent, captured.connected_bytes_received) == (None, None)
         peer.close_gate.clear()
         completion = bot.disconnect()
         await peer.closing.wait()
         assert not closed
-        peer.dtls_byte_counts = nethernet.DtlsByteCounts(1277, 5701)
+        assert bot.capture_statistics().connected_bytes_sent is None
         peer.close_gate.set()
         await completion
-        assert (closed[0].connected_bytes_sent, closed[0].connected_bytes_received) == (1277, 5701)
-        assert captured.connected_bytes_sent == 1234
+        assert (closed[0].connected_bytes_sent, closed[0].connected_bytes_received) == (None, None)
+        assert captured.connected_bytes_sent is None
         with pytest.raises(dataclasses.FrozenInstanceError):
             captured.connected_bytes_sent = 1
         await bot.reconnect()
         await bot.wait_ready(2)
-        assert bot.capture_statistics().connected_bytes_sent == 0
-        assert closed[0].connected_bytes_received == 5701
+        assert bot.capture_statistics().connected_bytes_sent is None
+        assert closed[0].connected_bytes_received is None
 
 
 @pytest.mark.parametrize("rejected", [False, True])
@@ -115,7 +117,7 @@ async def test_outgoing_counts_only_after_successful_send(monkeypatch, rejected)
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
-        peer.capacity.clear()
+        peer.pause_sender(bot)
         before = bot.capture_statistics()
 
         def boundary():
@@ -125,7 +127,7 @@ async def test_outgoing_counts_only_after_successful_send(monkeypatch, rejected)
         if rejected:
             peer.send_error = RuntimeError("controlled send rejection")
         bot.request_chunk_radius(4)
-        peer.capacity.set()
+        peer.resume_sender()
         if rejected:
             await until(lambda: peer.closed)
         else:
@@ -138,7 +140,7 @@ async def test_outgoing_counts_only_after_successful_send(monkeypatch, rejected)
             assert after.packet_counts_out.to_list() == before.packet_counts_out.to_list()
 
 
-async def test_statistics_through_actual_installed_nethernets_dtls_graph():
+async def test_application_statistics_through_actual_official_connection():
     from nethernet.identity import cpk_digest
     from peer import Peer
 
@@ -157,14 +159,18 @@ async def test_statistics_through_actual_installed_nethernets_dtls_graph():
         try:
             async for message in connection:
                 peer.received_wire.append(message)
+                previous = len(peer.received)
                 peer.accept(message)
+                for packet in peer.received[previous:]:
+                    if packet.packet_id == 115:
+                        peer.send(packet)
         finally:
             sender.cancel()
             await asyncio.gather(sender, return_exceptions=True)
             finished.set()
 
     async with nethernet.serve_http(
-        handler, host="127.0.0.1", ice_servers=[], limits=nethernet.ConnectionLimits(), identity_signer=signer
+        handler, host="127.0.0.1", ice_servers=[RTCIceServer(urls=[])], identity_signer=signer
     ) as server:
         async with api.Runtime() as runtime:
             bot = runtime.add_bot(
@@ -174,21 +180,17 @@ async def test_statistics_through_actual_installed_nethernets_dtls_graph():
                 )
             )
             await bot.wait_ready(10)
-            counts = bot._session.connection.get_dtls_byte_counts()
             before = bot.capture_statistics()
-            assert before.connected_bytes_sent == counts.bytes_sent > before.batch_bytes_out > 0
-            assert before.connected_bytes_received == counts.bytes_received > before.batch_bytes_in > 0
+            assert before.connected_bytes_sent is before.connected_bytes_received is None
+            assert before.batch_bytes_out > 0 and before.batch_bytes_in > 0
             bot.probe_latency()
-            await until(lambda: bot.capture_statistics().connected_bytes_sent > before.connected_bytes_sent)
+            await until(lambda: bot.capture_statistics().packet_counts_in[115] > before.packet_counts_in[115])
             await bot.disconnect()
             final = bot.capture_statistics()
-            counts = bot._session.connection.get_dtls_byte_counts()
-            assert (final.connected_bytes_sent, final.connected_bytes_received) == (
-                counts.bytes_sent,
-                counts.bytes_received,
-            )
-            assert final.connected_bytes_sent > before.connected_bytes_sent
-            assert before.to_dict()["connected_bytes_sent"] < final.connected_bytes_sent
+            assert final.connected_bytes_sent is final.connected_bytes_received is None
+            assert final.batch_bytes_out > before.batch_bytes_out
+            assert final.batch_bytes_in > before.batch_bytes_in
+            assert before.to_dict()["connected_bytes_sent"] is None
         await asyncio.wait_for(finished.wait(), 5)
 
 

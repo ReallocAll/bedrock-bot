@@ -11,9 +11,16 @@ NetherNet installs directly from its official Git repository; the PyPI package
 with that name is unrelated.
 
 This migration is a candidate. The pinned NetherNet verifier accepts a DER-string
-`cpk` and rejects JWK objects before login. The required live BDS check returned
-a JWK `cpk`, so BDS compatibility remains blocked; that assertion's signature is
-unverified. Mandatory identity verification and server pinning remain enabled.
+`cpk` and rejects JWK objects before login. The historical
+[JWK candidate `19176ef`](https://github.com/ReallocAll/nethernet-python/commit/19176ef)
+passed actual BDS JWT signature verification and SDP fingerprint
+checks; one attempt observed `LOGIN_SUCCESS`. The patch is not merged upstream, no upstream PR has
+been created, and the dependency pin above is unchanged. These results used an
+explicit candidate-wheel override.
+
+Ready and trade remain unaccepted because a separate ICE path lost consent.
+Further live validation requires a verified direct path. The migration remains
+incomplete; mandatory identity verification and server pinning remain enabled.
 
 ```python
 import asyncio

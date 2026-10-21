@@ -49,9 +49,11 @@ class Bot:
         self._runtime._guard(deliver=mutable)
 
     def _request(self, intent, reason=""):
+        if intent == "disconnect" and self._runtime._stopping:
+            return asyncio.shield(self._completion)
         if self._transition and self._intent == intent:
             return asyncio.shield(self._completion)
-        if not self._transition and intent == "disconnect" and self._session is not None and self._session.finished:
+        if not self._transition and intent == "disconnect" and (self._session is None or self._session.finished):
             done = self._runtime._loop.create_future()
             done.set_result(None)
             return done
@@ -159,9 +161,10 @@ class Bot:
     def get_status(self):
         self._guard()
         if self._session is None:
-            from .types import BotStatus
+            from .types import BotState, BotStatus
 
-            return BotStatus(session_id=self._generation)
+            state = BotState.scheduled if self._intent == "connect" and not self._runtime._stopping else BotState.closed
+            return BotStatus(session_id=self._generation, state=state)
         return self._session.status
 
     def get_event_interests(self):

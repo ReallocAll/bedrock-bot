@@ -118,7 +118,9 @@ from bedrock_protocol import Nbt as Nbt
 from bedrock_protocol import NbtType as NbtType
 from bedrock_protocol.v1001 import BlockPos as BlockPos
 from bedrock_protocol.v1001 import PropertySyncData as PropertySyncData
+from bedrock_protocol.v1001 import RedactableString as _RedactableString1001
 from bedrock_protocol.v1001 import SyncedAttribute as SyncedAttribute
+from bedrock_protocol.v2193 import RedactableString as _RedactableString2193
 
 from ._projection import (
     ActorLink as ActorLink,
@@ -164,6 +166,8 @@ from .types import TradeOfferRef as TradeOfferRef
 
 type IntProperty = PropertySyncData.PropertySyncIntEntry
 type FloatProperty = PropertySyncData.PropertySyncFloatEntry
+RedactableString1001 = _RedactableString1001
+RedactableString2193 = _RedactableString2193
 type PacketCounts = ReadonlySequence[int]
 type BlobIds = ReadonlySequence[int]
 type SlotObservations = ReadonlySequence[SlotObservation]

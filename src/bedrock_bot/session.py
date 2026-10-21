@@ -156,6 +156,7 @@ class Session:
         self.input = None
         self.look = None
         self.input_epoch = 0
+        self.equipment_epoch = 0
         self.handled_teleport = False
         self.dimension_deadline = None
         self.loading_screen_id = None
@@ -196,6 +197,7 @@ class Session:
         self.reason = reason
         self.input = self.look = None
         self.input_epoch += 1
+        self.equipment_epoch += 1
         self.send_event.set()
         if self.pending is not None:
             self.invalidate_operation(reason)
@@ -216,6 +218,8 @@ class Session:
             if not self.usable():
                 return
             self.state(BotState.connecting)
+            if not self.usable():
+                return
             self.identity = create_identity(self.options.name, self.options.uuid)
             async with asyncio.timeout(self.options.connect_timeout_ms / 1000):
                 self.connection = await transport._open_connection(self.options, self.identity)
@@ -586,6 +590,10 @@ class Session:
                         p.PlayerPositionModeComponent.PositionMode.RESPAWN,
                     ),
                 )
+            else:
+                actor = self.actors.get(packet.player_id)
+                if actor is not None and actor.type == "minecraft:player":
+                    self.move_actor(actor, vec(packet.pos), packet.rot.x, packet.rot.y, packet.y_head_rot)
         elif id == 161:
             if packet.prediction_type == p.RewindType.PLAYER:
                 self.position(vec(packet.pos), False, True, False)
@@ -625,8 +633,13 @@ class Session:
                 packet.abilities_data.target_player,
                 "minecraft:player",
                 vec(packet.pos),
+                velocity=vec(packet.velocity),
+                pitch=packet.rot.x,
+                yaw=packet.rot.y,
+                head_yaw=packet.y_head_rot,
                 metadata=packet.unpack.copy(),
                 properties=packet.synched_properties.copy(),
+                links=packet.links.copy(),
             )
             self.add_actor(actor)
         elif id == 14:
@@ -656,25 +669,7 @@ class Session:
                         else:
                             angles[i - 3] = value * 360 / 256
                 pitch, yaw, head = angles
-            if not finite(position):
-                raise _MalformedPacket("non-finite actor position")
-            actor = replace(actor, position=position, pitch=pitch, yaw=yaw, head_yaw=head)
-            self.actors[actor.runtime_id] = actor
-            self.emit(
-                ev.EventKind.actor_motion,
-                lambda: ev.ActorMotionEvent(
-                    self.id,
-                    actor.runtime_id,
-                    actor.unique_id,
-                    actor.position,
-                    actor.velocity,
-                    actor.pitch,
-                    actor.yaw,
-                    actor.head_yaw,
-                    actor.body_yaw,
-                ),
-            )
-            self.emit(ev.EventKind.actor, lambda: ev.ActorEvent(ev.ActorEvent.Kind.moved, actor))
+            self.move_actor(actor, position, pitch, yaw, head)
         elif id == 39:
             actor = self.actors.get(packet.id)
             if actor:
@@ -794,6 +789,7 @@ class Session:
                 raise _MalformedPacket("non-finite dimension position")
             self.input = self.look = None
             self.input_epoch += 1
+            self.equipment_epoch += 1
             self.invalidate_container()
             self.actors.clear()
             self.unique_ids.clear()
@@ -932,6 +928,7 @@ class Session:
             self.status = replace(self.status, alive=False, selected_hotbar=None)
             self.look = self.input = None
             self.input_epoch += 1
+            self.equipment_epoch += 1
             self.invalidate_container()
             self.inventories.clear()
             self.respawn_phase = 0
@@ -944,6 +941,27 @@ class Session:
             self.stats["respawns"] += 1
             self.emit(ev.EventKind.respawn, ev.RespawnEvent)
         self.emit(ev.EventKind.health, lambda: ev.HealthEvent(value))
+
+    def move_actor(self, actor, position, pitch, yaw, head):
+        if not finite(position, pitch, yaw, head):
+            raise _MalformedPacket("non-finite actor motion")
+        actor = replace(actor, position=position, pitch=pitch, yaw=yaw, head_yaw=head)
+        self.actors[actor.runtime_id] = actor
+        self.emit(
+            ev.EventKind.actor_motion,
+            lambda: ev.ActorMotionEvent(
+                self.id,
+                actor.runtime_id,
+                actor.unique_id,
+                actor.position,
+                actor.velocity,
+                actor.pitch,
+                actor.yaw,
+                actor.head_yaw,
+                actor.body_yaw,
+            ),
+        )
+        self.emit(ev.EventKind.actor, lambda: ev.ActorEvent(ev.ActorEvent.Kind.moved, actor))
 
     def add_actor(self, actor):
         if not finite(actor.position):
@@ -1090,7 +1108,7 @@ class Session:
         item = None if inventory is None else unwrap(inventory.slots.get(slot))
         if not isinstance(item, self.p.SerializedNetworkItemStackDescriptor):
             raise RuntimeError("hotbar item is unknown or descriptor version mismatch")
-        epoch = self.input_epoch
+        epoch = self.equipment_epoch
         self.enqueue(
             self.p.MobEquipmentPacket(
                 runtime_id=self.status.actor_runtime_id,
@@ -1099,7 +1117,7 @@ class Session:
                 selected_slot=slot,
                 container_id=self.p.ContainerID.INVENTORY,
             ),
-            valid=lambda: epoch == self.input_epoch,
+            valid=lambda: epoch == self.equipment_epoch,
         )
         self.status = replace(self.status, selected_hotbar=slot)
 

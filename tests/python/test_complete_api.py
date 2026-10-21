@@ -50,8 +50,12 @@ def test_all_eighteen_event_materialization_contracts():
         assert set(event.to_dict()) == keys
         cloned = event.copy()
         assert cloned is not event and cloned.to_dict() == event.to_dict()
-        with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
-            event.changed = True
+        materialized = event.to_dict()
+        for field in dataclasses.fields(event):
+            value = getattr(event, field.name)
+            with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
+                setattr(event, field.name, value)
+            assert event.to_dict() == materialized
     assert examples[0][0].to_dict()["state"] is api.BotState.ready
     assert examples[3][0].blob_ids.to_list() == [42]
     assert examples[8][0].to_dict()["kind"] is api.ActorEvent.Kind.added

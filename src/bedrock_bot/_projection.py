@@ -339,6 +339,12 @@ def project(value):
 def detach(value):
     if isinstance(value, (Record, _Payload, ReadonlySequence, ReadonlyMap, bp.Value)):
         return value.copy()
+    if type(value) is list:
+        return [detach(entry) for entry in value]
+    if type(value) is dict:
+        return {key: detach(entry) for key, entry in value.items()}
+    if type(value) is tuple:
+        return tuple(detach(entry) for entry in value)
     if is_dataclass(value):
         return type(value)(**{field.name: detach(getattr(value, field.name)) for field in fields(value)})
     return value

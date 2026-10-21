@@ -26,6 +26,9 @@ only touched slots. Results are immutable and published before item-request
 callbacks. A reconnect preserves the Bot handle and token but invalidates old
 session, entity, window, offer, slot, and request references.
 
+Queued hotbar selections survive position corrections and precede subsequent
+interactions. Death, dimension changes, and disconnect invalidate queued selections.
+
 Collections support indexed/keyed reads, iteration, detached `copy()`, and explicit
 `to_list()` or `to_dict()`. Dictionary output retains domain enums and opaque
 BotToken identity, converts protocol enums and numeric ID wrappers to integers,
@@ -33,6 +36,10 @@ and preserves binary values as bytes. NBT remains tagged, including the element
 type of an empty list. Item and metadata projections preserve their legacy fields
 while retaining immutable native storage. `wire_bytes()` means re-encoding, not
 proof of the original bytes received from the peer.
+
+Player observations retain their initial velocity, rotation, and links. Remote
+player movement updates position and rotation and emits `actor_motion`; retained
+captures keep their previous values.
 
 # Statistics
 
@@ -55,9 +62,18 @@ Outbound bytes, packets, and `packet_counts_out` advance only after awaited
 
 The pinned official NetherNet verifier requires the server JWT's `cpk` to be a
 base64 DER string. It rejects a JWK object before cryptographic verification or
-the pin callback. The required live BDS check returned a JWK `cpk`, blocking this
-migration candidate before login. That assertion's signature and gameplay remain
-unverified; identity verification and mandatory pinning stay enabled.
+the pin callback. The historical
+[JWK candidate `19176ef`](https://github.com/ReallocAll/nethernet-python/commit/19176ef)
+passed actual BDS JWT signature verification and SDP fingerprint
+checks, with one `LOGIN_SUCCESS` observed. This used an explicit candidate-wheel override; the
+patch is not merged upstream, no upstream PR has been created, and the production
+dependency pin remains `695095c`.
+
+Ready and trade remain unaccepted. A separate ICE diagnostic recorded six
+unanswered consent requests to `198.18.0.1:49309` before consent expired. That
+address belongs to Mihomo / Meta Tunnel; the exact rewriting rule and root cause
+are unproven. A verified direct path is required before further live business
+validation. Identity verification and mandatory pinning stay enabled.
 
 The application queue accepts at most 4096 packets and 4 MiB of estimated encoded
 data, including a batch being submitted. Commands are revalidated before batch

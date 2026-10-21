@@ -60,20 +60,26 @@ Outbound bytes, packets, and `packet_counts_out` advance only after awaited
 
 # Transport and lifetime
 
-The pinned official NetherNet verifier requires the server JWT's `cpk` to be a
-base64 DER string. It rejects a JWK object before cryptographic verification or
-the pin callback. The historical
+The approved temporary NetherNet fork is pinned to
+`ReallocAll/nethernet-python@1fd9b9907e602c3b906ad45abe856ea8e9358861`
+from `fix/jwk-server-identity`; its JWK support is under review in
+[upstream PR #1](https://github.com/EndstoneMC/nethernet-python/pull/1).
+It accepts public EC JWK and DER-string `cpk` values while preserving JWT,
+SDP-fingerprint, and mandatory server-pin verification. The previous official
+`695095c` graph rejected the current server's JWK before those verification steps;
+that failed attempt remains archived. Fresh selected-graph delivery and live
+business validation are in progress.
+
+The historical
 [JWK candidate `19176ef`](https://github.com/ReallocAll/nethernet-python/commit/19176ef)
 passed actual BDS JWT signature verification and SDP fingerprint
-checks, with one `LOGIN_SUCCESS` observed. This used an explicit candidate-wheel override; the
-patch is not merged upstream, no upstream PR has been created, and the production
-dependency pin remains `695095c`.
-
-Ready and trade remain unaccepted. A separate ICE diagnostic recorded six
+checks, with one `LOGIN_SUCCESS` observed under an explicit candidate-wheel
+override. Those results do not transfer to `1fd9b99`. That candidate's separate
+ICE diagnostic recorded six
 unanswered consent requests to `198.18.0.1:49309` before consent expired. That
 address belongs to Mihomo / Meta Tunnel; the exact rewriting rule and root cause
-are unproven. A verified direct path is required before further live business
-validation. Identity verification and mandatory pinning stay enabled.
+are unproven. Current live acceptance will use a separately verified direct path;
+identity verification, mandatory pinning, and consent checks stay enabled.
 
 The application queue accepts at most 4096 packets and 4 MiB of estimated encoded
 data, including a batch being submitted. Commands are revalidated before batch

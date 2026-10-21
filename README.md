@@ -5,22 +5,26 @@ native protocol views, and NetherNet transport. The supported business protocols
 are 1001 and 2193.
 
 Install the matching `bedrock-protocol==0.5.0.dev0` wheel, then install this package
-with `python -m pip install .`. Dependencies select official NetherNet commit
-`695095c7d853e56fd60076bfe6db9fab6714e88b`, aiortc 1.15.0 and aioice 0.10.2.
-NetherNet installs directly from its official Git repository; the PyPI package
-with that name is unrelated.
+with `python -m pip install .`. Dependencies select the approved temporary
+`ReallocAll/nethernet-python` fork at commit
+`1fd9b9907e602c3b906ad45abe856ea8e9358861` from `fix/jwk-server-identity`,
+with aiortc 1.15.0 and aioice 0.10.2. The JWK change is under review in
+[upstream PR #1](https://github.com/EndstoneMC/nethernet-python/pull/1).
+NetherNet installs from that immutable Git commit; the PyPI package with that
+name is unrelated.
 
-This migration is a candidate. The pinned NetherNet verifier accepts a DER-string
-`cpk` and rejects JWK objects before login. The historical
+The selected fork supports public EC JWK and DER-string `cpk` values while
+retaining JWT signatures, SDP fingerprints, and mandatory server pinning. The
+previous official `695095c` attempt failed at its server identity format check;
+that failure remains archived. Fresh delivery and live business validation of
+the selected `1fd9b99` graph are in progress.
+
+The historical
 [JWK candidate `19176ef`](https://github.com/ReallocAll/nethernet-python/commit/19176ef)
 passed actual BDS JWT signature verification and SDP fingerprint
-checks; one attempt observed `LOGIN_SUCCESS`. The patch is not merged upstream, no upstream PR has
-been created, and the dependency pin above is unchanged. These results used an
-explicit candidate-wheel override.
-
-Ready and trade remain unaccepted because a separate ICE path lost consent.
-Further live validation requires a verified direct path. The migration remains
-incomplete; mandatory identity verification and server pinning remain enabled.
+checks; one attempt observed `LOGIN_SUCCESS` under an explicit candidate-wheel
+override. Its later ICE path lost consent. Those results apply to that historical
+candidate and do not establish Ready or trade acceptance for the current pin.
 
 ```python
 import asyncio

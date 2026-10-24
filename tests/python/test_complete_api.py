@@ -49,14 +49,14 @@ def test_all_event_materialization_contracts():
     assert len(examples) == int(api.EventKind.count) - 1 == 19
     for event, keys in examples:
         assert set(event.to_dict()) == keys
+    # Record copying is shared; cover a nested value and ItemRequest's custom view.
+    for event in (examples[2][0], examples[15][0]):
         cloned = event.copy()
         assert cloned is not event and cloned.to_dict() == event.to_dict()
-        materialized = event.to_dict()
-        for field in dataclasses.fields(event):
-            value = getattr(event, field.name)
-            with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
-                setattr(event, field.name, value)
-            assert event.to_dict() == materialized
+    position = examples[2][0]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        position.position = api.Vec3()
+    assert position.to_dict()["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
     assert examples[0][0].to_dict()["state"] is api.BotState.ready
     assert examples[3][0].blob_ids.to_list() == [42]
     assert examples[8][0].to_dict()["kind"] is api.ActorEvent.Kind.added

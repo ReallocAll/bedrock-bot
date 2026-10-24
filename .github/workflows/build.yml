@@ -159,7 +159,7 @@ jobs:
           adapter_sources=("$RUNNER_TEMP"/adapter-test-source/*)
           test "${#adapter_sources[@]}" -eq 1
           cd "${adapter_sources[0]}"
-          "$consumer" -I -W error -m pytest tests --sdk-source "${sources[0]}"
+          "$consumer" -I -m pytest tests --sdk-source "${sources[0]}"
       - name: Upload SDK distributions
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7.0.2

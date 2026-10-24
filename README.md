@@ -104,10 +104,10 @@ and access to the compatible protocol wheels. The filenames below follow the
 current package version; use the filenames produced by your build:
 
 ```shell
-python -m pip install --find-links ../bedrock-protocol/dist "dist/bedrock_bot-0.2.0.dev0-py3-none-any.whl[test]"
+python -m pip install --find-links ../bedrock-protocol/dist "dist/bedrock_bot-0.1.0-py3-none-any.whl[test]"
 mkdir ../bedrock-bot-test-source
-tar -xf dist/bedrock_bot-0.2.0.dev0.tar.gz -C ../bedrock-bot-test-source
-cd ../bedrock-bot-test-source/bedrock_bot-0.2.0.dev0
+tar -xf dist/bedrock_bot-0.1.0.tar.gz -C ../bedrock-bot-test-source
+cd ../bedrock-bot-test-source/bedrock_bot-0.1.0
 python -I -m pytest tests/python tests/integration/nethernet/test_transport.py
 ```
 

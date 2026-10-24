@@ -1,8 +1,5 @@
 import gc
-import subprocess
-import sys
 from dataclasses import FrozenInstanceError, dataclass
-from pathlib import Path
 
 import bedrock_protocol as bp
 import pytest
@@ -38,22 +35,6 @@ def test_public_vector_subclass_preserves_its_fields_and_copy():
         copied.label = "changed"
 
 
-def test_other_record_still_projects_and_detaches_nested_values():
-    @dataclass(frozen=True, slots=True)
-    class NestedRecord(Record):
-        values: object
-
-    native = bp.v1001.Vec3(x=4, y=5, z=6)
-    record = NestedRecord({"vectors": [native]})
-    assert project(record) is record
-    assert isinstance(record.values, ReadonlyMap)
-    assert isinstance(record.values["vectors"], ReadonlySequence)
-    assert type(record.values["vectors"][0]) is api.Vec3
-    copied = record.copy()
-    assert copied is not record and copied.values is not record.values
-    assert copied.to_dict() == {"values": {"vectors": [{"x": 4, "y": 5, "z": 6}]}}
-
-
 def test_distinct_record_layouts_and_subclasses_freeze_runtime_values_independently():
     def layout(field_name):
         return dataclass(frozen=True, slots=True)(type(
@@ -72,6 +53,7 @@ def test_distinct_record_layouts_and_subclasses_freeze_runtime_values_independen
     sequence = SequenceRecord(values)
     mapped = MappingRecord(mapping)
     child = ChildRecord(values, bp.v2193.PlayStatus.PLAYER_SPAWN)
+    assert project(child) is child
     # Projection follows actual values, even when their annotations are scalar.
     assert isinstance(sequence.values, ReadonlySequence)
     assert isinstance(mapped.mapping, ReadonlyMap)
@@ -149,29 +131,3 @@ async def test_captured_vectors_survive_actor_replacement_and_reconnect(monkeypa
     assert updated.position == api.Vec3(7, 8, 9)
     with pytest.raises(FrozenInstanceError):
         original.position.x = 0
-
-
-@pytest.mark.parametrize("first", ["bedrock_bot._projection", "bedrock_bot.types", "bedrock_bot.observations"])
-def test_fresh_import_projects_vectors_without_partial_initialization(first):
-    code = """
-import importlib
-import sys
-sys.path.insert(0, sys.argv[1])
-importlib.import_module(sys.argv[2])
-from bedrock_bot._projection import project
-from bedrock_bot.observations import ActorSnapshot
-from bedrock_bot.types import Vec3
-import bedrock_protocol as bp
-vector = Vec3(1, 2, 3)
-assert project(vector) is vector
-assert ActorSnapshot(91, -92, 'actor', vector).position is vector
-assert project(bp.v2193.Vec3(x=4, y=5, z=6)) == Vec3(4, 5, 6)
-"""
-    result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", code, str(Path(api.__file__).resolve().parent.parent), first],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr

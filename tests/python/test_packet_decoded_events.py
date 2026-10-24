@@ -20,7 +20,8 @@ async def test_packet_events_interleave_recovery_before_business_and_retain_nati
             observations.append((packet_id, bot.capture_statistics().play_packet_counts_in[packet_id],
                                  bot.get_status().health))
 
-    interests = api.event_mask(api.EventKind.packet_decoded) | api.event_mask(api.EventKind.decode_error)
+    interests = (api.event_mask(api.EventKind.packet_decoded) | api.event_mask(api.EventKind.decode_error)
+                 | api.event_mask(api.EventKind.health))
     async with api.Runtime(callback, events=interests) as runtime:
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer", validate_all_packets=True,
                                             recover_packet_errors=True))
@@ -37,26 +38,39 @@ async def test_packet_events_interleave_recovery_before_business_and_retain_nati
             peer.codec.encode_packet(peer.p.SetHealthPacket(health=16)),
         ))
         await until(lambda: bot.get_status().health == 16)
-        assert [type(event) for event in events] == [api.PacketDecodedEvent, api.DecodeErrorEvent,
+        assert [type(event) for event in events] == [api.PacketDecodedEvent, api.HealthEvent, api.DecodeErrorEvent,
                                                     api.PacketDecodedEvent, api.PacketDecodedEvent,
-                                                    api.PacketDecodedEvent]
-        assert events[1].packet_id == 42 and events[1].recoverable is True
+                                                    api.PacketDecodedEvent, api.HealthEvent]
+        assert events[2].packet_id == 42 and events[2].reason and events[2].recoverable is True
+        after = bot.capture_statistics()
+        assert after.packets_in == before.packets_in + 5
+        assert after.packet_counts_in[42] == before.packet_counts_in[42] + 4
+        assert after.play_packet_counts_in[42] == before.play_packet_counts_in[42] + 3
+        assert after.decode_errors == before.decode_errors + 1
         assert [entry[0] for entry in observations] == [42, 900, 42, 42]
         assert [entry[1] for entry in observations] == [before.play_packet_counts_in[42] + 1,
                                                        before.play_packet_counts_in[900] + 1,
                                                        before.play_packet_counts_in[42] + 2,
                                                        before.play_packet_counts_in[42] + 3]
         assert [entry[2] for entry in observations] == [None, 17, 17, 17]
-        retained = events[2]
+        retained = events[3]
         assert not hasattr(retained, "copy") and not hasattr(retained, "to_dict")
         body = memoryview(retained.packet.payload.body)
-        assert body.readonly and events[3].packet.header.sender_subclient_id == 1
+        assert body.readonly and events[4].packet.header.sender_subclient_id == 1
         with pytest.raises(dataclasses.FrozenInstanceError):
             retained.packet = None
         with pytest.raises(AttributeError):
             retained.packet.header.packet_id = 1
         with pytest.raises(AttributeError):
             retained.packet.payload.body = b"changed"
+        peer.send(peer.p.SetHealthPacket(health=15))
+        await until(lambda: bot.get_status().health == 15)
+        assert bot.get_status().state == api.BotState.ready
+        continued = bot.capture_statistics()
+        assert continued.packets_in == before.packets_in + 6
+        assert continued.packet_counts_in[42] == before.packet_counts_in[42] + 5
+        assert continued.play_packet_counts_in[42] == before.play_packet_counts_in[42] + 4
+        assert continued.decode_errors == after.decode_errors
     events.clear()
     gc.collect()
     assert retained.packet.protocol == 2193

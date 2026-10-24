@@ -118,35 +118,6 @@ async def test_session_login_retains_declared_offline_xuid(monkeypatch):
         assert bot.capture_options().xuid == "2535400000000042"
 
 
-async def test_native_body_recovery_preserves_error_order_and_play_counts(monkeypatch):
-    peers = Peers(monkeypatch, compression_threshold=65535)
-    events = []
-    interests = api.event_mask(api.EventKind.decode_error) | api.event_mask(api.EventKind.health)
-    async with api.Runtime(lambda _bot, event: events.append(event), events=interests) as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer", validate_all_packets=True,
-                                            recover_packet_errors=True))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        before = bot.capture_statistics()
-        peer.incoming.put_nowait(framed(
-            peer.codec.encode_packet(peer.p.SetHealthPacket(health=17)),
-            uvarint(42),
-            peer.codec.encode_packet(peer.p.SetHealthPacket(health=16)),
-        ))
-        await until(lambda: bot.get_status().health == 16)
-        after = bot.capture_statistics()
-        assert [type(event) for event in events] == [api.HealthEvent, api.DecodeErrorEvent, api.HealthEvent]
-        assert events[1].packet_id == 42 and events[1].reason and events[1].recoverable is True
-        assert after.decode_errors == before.decode_errors + 1
-        assert after.packets_in == before.packets_in + 3
-        assert after.packet_counts_in[42] == before.packet_counts_in[42] + 3
-        assert after.play_packet_counts_in[42] == before.play_packet_counts_in[42] + 2
-        peer.send(peer.p.SetHealthPacket(health=15))
-        await until(lambda: bot.get_status().health == 15)
-        assert bot.get_status().state == api.BotState.ready
-        assert bot.capture_statistics().play_packet_counts_in[42] == before.play_packet_counts_in[42] + 3
-
-
 @pytest.mark.parametrize("failure", ["framing", "header"])
 async def test_native_recovery_keeps_structural_errors_fatal(monkeypatch, failure):
     peers = Peers(monkeypatch, compression_threshold=65535)

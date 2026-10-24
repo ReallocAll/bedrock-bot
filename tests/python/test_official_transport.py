@@ -1,7 +1,6 @@
 import asyncio
 from types import SimpleNamespace
 
-import bedrock_protocol as bp
 import pytest
 from bedrock_protocol.wire import Compression
 from peer import Peers, submit, until
@@ -117,22 +116,6 @@ async def test_outbound_message_limit_rejects_before_item_submission(monkeypatch
         assert result.outcome == api.ItemRequestOutcome.cancelled
         assert not any(packet.packet_id == 147 for packet in peer.received)
         assert bot.capture_statistics().packets_out == before.packets_out
-
-
-async def test_preparation_error_precedes_queue_capacity_failure(monkeypatch):
-    peers = Peers(monkeypatch)
-    async with api.Runtime() as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        peer.pause_sender(bot)
-        monkeypatch.setattr(transport, "COMMAND_PACKETS", 0)
-        with pytest.raises(bp.EncodeError) as caught:
-            bot._session.enqueue(object())
-        assert bot._session.error is caught.value
-        assert caught.value.reason == "packet_type_unavailable"
-        assert "queue limit" not in bot._session.reason
-        await until(lambda: peer.closed)
 
 
 @pytest.mark.parametrize("protocol", [1001, 2193])

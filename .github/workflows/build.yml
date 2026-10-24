@@ -42,6 +42,19 @@ jobs:
           repository: ReallocAll/bedrock-protocol
           ref: main
           path: dependency/bedrock-protocol
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: ReallocAll/bedrock-bench
+          ref: main
+          path: dependency/bedrock-bench
+          persist-credentials: false
+      - name: Record the tested dependency graph
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          printf 'SDK=%s\nPROTOCOL=%s\nBENCH=%s\n' "$GITHUB_SHA" \
+            "$(git -C dependency/bedrock-protocol rev-parse HEAD)" \
+            "$(git -C dependency/bedrock-bench rev-parse HEAD)"
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
@@ -105,7 +118,12 @@ jobs:
             -C host-profile=delivery -C build-profile=delivery -C "build-dir=$RUNNER_TEMP/protocol-native-build"
       - name: Build SDK distributions
         run: python -m build "$GITHUB_WORKSPACE" --outdir "$RUNNER_TEMP/sdk-dist"
-      - name: Test installed SDK from its source distribution
+      - name: Build benchmark consumer distributions
+        run: |
+          bench="$GITHUB_WORKSPACE/dependency/bedrock-bench"
+          python -m build "$bench" --outdir "$RUNNER_TEMP/harness-dist"
+          python -m build "$bench/bots/python" --outdir "$RUNNER_TEMP/adapter-dist"
+      - name: Test installed SDK and adapter from their source distributions
         run: |
           python -m venv "$RUNNER_TEMP/sdk-consumer"
           if [ "$RUNNER_OS" = Windows ]; then
@@ -117,11 +135,18 @@ jobs:
           native=("$RUNNER_TEMP"/protocol-native/*.whl)
           sdk=("$RUNNER_TEMP"/sdk-dist/*.whl)
           archives=("$RUNNER_TEMP"/sdk-dist/*.tar.gz)
+          harness=("$RUNNER_TEMP"/harness-dist/*.whl)
+          adapter=("$RUNNER_TEMP"/adapter-dist/*.whl)
+          adapter_archives=("$RUNNER_TEMP"/adapter-dist/*.tar.gz)
           test "${#pure[@]}" -eq 1
           test "${#native[@]}" -eq 1
           test "${#sdk[@]}" -eq 1
           test "${#archives[@]}" -eq 1
-          "$consumer" -m pip install "${pure[0]}" "${native[0]}" "${sdk[0]}[test]"
+          test "${#harness[@]}" -eq 1
+          test "${#adapter[@]}" -eq 1
+          test "${#adapter_archives[@]}" -eq 1
+          "$consumer" -m pip install "${pure[0]}" "${native[0]}" "${sdk[0]}[test]" \
+            "${harness[0]}" "${adapter[0]}[test]"
           "$consumer" -m pip check
           mkdir "$RUNNER_TEMP/sdk-test-source"
           python -m tarfile -e "${archives[0]}" "$RUNNER_TEMP/sdk-test-source" --filter data
@@ -129,6 +154,12 @@ jobs:
           test "${#sources[@]}" -eq 1
           cd "${sources[0]}"
           "$consumer" -I -W error -m pytest tests/python tests/integration/nethernet/test_transport.py
+          mkdir "$RUNNER_TEMP/adapter-test-source"
+          python -m tarfile -e "${adapter_archives[0]}" "$RUNNER_TEMP/adapter-test-source" --filter data
+          adapter_sources=("$RUNNER_TEMP"/adapter-test-source/*)
+          test "${#adapter_sources[@]}" -eq 1
+          cd "${adapter_sources[0]}"
+          "$consumer" -I -W error -m pytest tests --sdk-source "${sources[0]}"
       - name: Upload SDK distributions
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7.0.2

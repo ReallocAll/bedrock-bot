@@ -36,7 +36,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       PROTOCOL_SHA: 001291789ca75a2c34b4fb65cf83e22503a20ab1
-      BENCH_SHA: 71da857f697702587dd3d47d6e56f481e4b8b480
+      BENCH_SHA: bd07732eff5053d304833a55ef04cb76e90938e0
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Require exact candidate dependencies

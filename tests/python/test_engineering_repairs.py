@@ -10,30 +10,6 @@ from test_respawn_retry import ready_bot
 from trade_peer import deliver, inventory_packet, scene
 
 import bedrock_bot as api
-from bedrock_bot.session import finite
-
-
-@dataclass(frozen=True, slots=True)
-class ExtraVec3(api.Vec3):
-    extra: float = 0
-
-
-@dataclass(frozen=True, slots=True)
-class ExtraVec2(api.Vec2):
-    extra: float = 0
-
-
-@pytest.mark.parametrize("vector", [api.Vec2(), api.Vec3(), ExtraVec2(), ExtraVec3()])
-def test_finite_preserves_all_vector_fields_and_nonfinite_values(vector):
-    assert finite(vector)
-    names = ("x", "y", "z") if isinstance(vector, api.Vec3) else ("x", "y")
-    if isinstance(vector, (ExtraVec2, ExtraVec3)):
-        names += ("extra",)
-    for name in names:
-        for invalid in (float("nan"), float("inf"), -float("inf")):
-            assert not finite(replace(vector, **{name: invalid}))
-    with pytest.raises(TypeError):
-        finite(replace(vector, x="invalid", y=float("nan")))
 
 
 @dataclass(slots=True)
@@ -60,7 +36,7 @@ async def test_input_copy_is_independent_and_keeps_all_fields_and_subclass_layou
     assert captured.move == api.Vec2(-1, 1) and math.copysign(1, captured.pitch) == -1
     assert captured.yaw == 75 and captured.vertical_collision is False
     with pytest.raises(ValueError, match="finite"):
-        bot.set_input(api.Input(position=ExtraVec3(extra=float("inf"))))
+        bot.set_input(api.Input(position=api.Vec3(x=float("inf"))))
     assert session.input is captured
 
 

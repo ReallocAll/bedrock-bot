@@ -1,6 +1,5 @@
 import dataclasses
 
-import bedrock_protocol as bp
 import pytest
 from peer import Peer, Peers, until
 from test_statistics import framed, uvarint
@@ -116,63 +115,3 @@ async def test_session_login_retains_declared_offline_xuid(monkeypatch):
         await bot.wait_ready(2)
         assert peers.connections[-1].login[1]["xid"] == "2535400000000042"
         assert bot.capture_options().xuid == "2535400000000042"
-
-
-@pytest.mark.parametrize("failure", ["framing", "header"])
-async def test_native_recovery_keeps_structural_errors_fatal(monkeypatch, failure):
-    peers = Peers(monkeypatch, compression_threshold=65535)
-    errors = []
-    async with api.Runtime(lambda _bot, event: errors.append(event),
-                           events=api.event_mask(api.EventKind.decode_error)) as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer", validate_all_packets=True,
-                                            recover_packet_errors=True))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        before = bot.capture_statistics()
-        good = peer.codec.encode_packet(peer.p.SetHealthPacket(health=17))
-        raw = {
-            "framing": framed(good) + b"\xff",
-            "header": framed(good, uvarint(1 << 14)),
-        }[failure]
-        peer.incoming.put_nowait(raw)
-        await until(lambda: peer.closed)
-        after = bot.capture_statistics()
-        assert bot.get_status().state == api.BotState.failed
-        assert len(errors) == 1 and errors[0].recoverable is False
-        if failure == "framing":
-            assert errors[0].packet_id == -1
-        assert after.decode_errors == before.decode_errors + 1
-        assert after.batch_bytes_in == before.batch_bytes_in + len(raw)
-        assert after.packets_in == before.packets_in
-        assert after.play_packet_counts_in.to_list() == before.play_packet_counts_in.to_list()
-
-
-@pytest.mark.parametrize("validate_all", [False, True])
-@pytest.mark.parametrize("recover", [False, True])
-async def test_unknown_packet_is_success_and_next_batch_remains_usable(monkeypatch, validate_all, recover):
-    peers = Peers(monkeypatch, compression_threshold=65535)
-    errors = []
-    async with api.Runtime(lambda _bot, event: errors.append(event),
-                           events=api.event_mask(api.EventKind.decode_error)) as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer", validate_all_packets=validate_all,
-                                            recover_packet_errors=recover))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        before = bot.capture_statistics()
-        peer.send(
-            peer.p.SetHealthPacket(health=17),
-            bp.UnknownPacket(packet_id=900, body=b"owned opaque packet body"),
-            peer.p.SetHealthPacket(health=16),
-        )
-        await until(lambda: bot.get_status().health == 16)
-        after = bot.capture_statistics()
-        assert after.packets_in == before.packets_in + 3
-        assert after.packet_counts_in[900] == before.packet_counts_in[900] + 1
-        assert after.play_packet_counts_in[42] == before.play_packet_counts_in[42] + 2
-        assert after.play_packet_counts_in[900] == before.play_packet_counts_in[900] + validate_all
-        assert after.decode_errors == before.decode_errors and not errors
-        peer.send(peer.p.SetHealthPacket(health=15))
-        await until(lambda: bot.get_status().health == 15)
-        assert bot.get_status().state == api.BotState.ready
-        assert bot.capture_statistics().play_packet_counts_in[42] == before.play_packet_counts_in[42] + 3
-        assert bot.capture_statistics().decode_errors == before.decode_errors and not errors

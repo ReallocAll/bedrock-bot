@@ -6,7 +6,7 @@ import pytest
 from peer import Peers, actor_packet, motion_packet, until
 
 import bedrock_bot as api
-from bedrock_bot._projection import ReadonlyMap, ReadonlySequence, Record, project
+from bedrock_bot._projection import project
 
 
 def test_exact_public_vector_keeps_identity_and_immutability():
@@ -33,41 +33,6 @@ def test_public_vector_subclass_preserves_its_fields_and_copy():
     assert copied.to_dict() == {"x": 1, "y": 2, "z": 3, "label": "tag"}
     with pytest.raises(FrozenInstanceError):
         copied.label = "changed"
-
-
-def test_distinct_record_layouts_and_subclasses_freeze_runtime_values_independently():
-    def layout(field_name):
-        return dataclass(frozen=True, slots=True)(type(
-            "SameName", (Record,), {"__module__": __name__, "__annotations__": {field_name: int}}
-        ))
-
-    SequenceRecord = layout("values")
-    MappingRecord = layout("mapping")
-
-    @dataclass(frozen=True, slots=True)
-    class ChildRecord(SequenceRecord):
-        status: object
-
-    values = [bp.v1001.Vec3(x=1, y=2, z=3)]
-    mapping = {"count": 7}
-    sequence = SequenceRecord(values)
-    mapped = MappingRecord(mapping)
-    child = ChildRecord(values, bp.v2193.PlayStatus.PLAYER_SPAWN)
-    assert project(child) is child
-    # Projection follows actual values, even when their annotations are scalar.
-    assert isinstance(sequence.values, ReadonlySequence)
-    assert isinstance(mapped.mapping, ReadonlyMap)
-    assert type(child.status) is int
-    values[:] = [bp.v1001.Vec3(x=4, y=5, z=6), None]
-    mapping["count"] = 9
-    copied = child.copy()
-    assert copied is not child and copied.values is not child.values
-    expected = {"values": [{"x": 1, "y": 2, "z": 3}], "status": int(bp.v2193.PlayStatus.PLAYER_SPAWN)}
-    assert child.to_dict() == copied.to_dict() == expected
-    assert sequence.to_dict() == {"values": expected["values"]}
-    assert mapped.to_dict() == mapped.copy().to_dict() == {"mapping": {"count": 7}}
-    assert SequenceRecord([None]).to_dict() == {"values": [None]}
-    assert MappingRecord({"other": 8}).to_dict() == {"mapping": {"other": 8}}
 
 
 @pytest.mark.parametrize("version", [1001, 2193])

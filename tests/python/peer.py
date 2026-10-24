@@ -50,7 +50,6 @@ def offer(public):
 
 class Peer:
     def __init__(self, version=2193, *, automatic=True, server_handshake=True, compression_threshold=1):
-        from bedrock_bot.transport import _Connection
 
         self.version = version
         self.p = getattr(bp, f"v{version}")
@@ -69,7 +68,7 @@ class Peer:
         self.login = None
         self.before_send = None
         self.send_error = None
-        self.connection = _Connection(SimpleNamespace(send=self.send_bytes, recv=self.recv, close=self.close))
+        self.connection = SimpleNamespace(send=self.send_bytes, recv=self.recv, close=self.close)
         self._sender_event = None
 
     def pause_sender(self, bot):

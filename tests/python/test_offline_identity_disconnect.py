@@ -69,7 +69,7 @@ async def test_native_disconnect_fields_survive_session_cleanup(monkeypatch, pro
         closes.append(True)
 
     async def open_connection(_options, _identity):
-        return transport._Connection(SimpleNamespace(send=send, close=close))
+        return SimpleNamespace(send=send, close=close)
 
     monkeypatch.setattr(transport, "_open_connection", open_connection)
     session.reader = reader
@@ -92,28 +92,3 @@ async def test_native_disconnect_fields_survive_session_cleanup(monkeypatch, pro
         captured.disconnect.message = "changed"
     session.disconnect_reason = None
     assert captured.disconnect == expected
-
-
-async def test_transport_message_validation_precedes_send_and_counts_only_success(monkeypatch):
-    sent = []
-
-    async def send(data):
-        sent.append(data)
-        if data == b"fail":
-            raise OSError("rejected")
-
-    async def connect_http(*_args, **_kwargs):
-        return SimpleNamespace(send=send)
-
-    monkeypatch.setattr(transport, "connect_http", connect_http)
-    options = api.BotOptions(server_url="http://peer", server_key_sha256="0" * 64)
-    connection = await transport._open_connection(options, create_identity(options.name, options.uuid))
-    assert isinstance(connection, transport._Connection)
-    monkeypatch.setattr(transport, "MAX_WIRE_MESSAGE", 4)
-    with pytest.raises(ValueError, match="wire message limit"):
-        await connection.send(b"large")
-    assert sent == [] and connection.batch_bytes_out == 0
-    await connection.send(b"okay")
-    with pytest.raises(OSError, match="rejected"):
-        await connection.send(b"fail")
-    assert sent == [b"okay", b"fail"] and connection.batch_bytes_out == 4

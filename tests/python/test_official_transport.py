@@ -64,7 +64,11 @@ async def test_send_failure_is_indeterminate_and_keeps_batch_accounted(monkeypat
         assert result.outcome == api.ItemRequestOutcome.indeterminate
         assert bot.get_status().state == api.BotState.failed
         assert not any(packet.packet_id == 147 for packet in peer.received)
-        assert bot.capture_statistics().packets_out == before.packets_out
+        after = bot.capture_statistics()
+        assert after.packets_out == before.packets_out
+        assert after.batch_bytes_out == before.batch_bytes_out
+        assert after.packet_counts_out.to_list() == before.packet_counts_out.to_list()
+        assert after.play_packet_counts_out.to_list() == before.play_packet_counts_out.to_list()
         assert bot._session.queue_packets == bot._session.queue_bytes == 0
 
 

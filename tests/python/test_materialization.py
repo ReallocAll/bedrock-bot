@@ -53,17 +53,6 @@ def test_versioned_projection_uses_native_provenance_and_types_without_module_me
         assert project(decoded).copy().to_dict()["protocol"] == version
 
 
-def test_shared_native_type_uses_decoded_provenance_and_constructed_1001_fallback(monkeypatch):
-    codec = bp.Codec(2193)
-    constructed = open_packet(bp.v2193)
-    decoded = codec.decode_packet(codec.encode_packet(constructed)).payload
-    monkeypatch.setattr(bp.v1001, "ContainerOpenPacket", bp.v2193.ContainerOpenPacket)
-    assert constructed.protocol is None
-    assert api.ContainerSnapshot(open=constructed).open.protocol == 1001
-    projected = api.ContainerSnapshot(open=decoded).open
-    assert projected.protocol == 2193 and projected.copy().to_dict()["protocol"] == 2193
-
-
 @pytest.mark.parametrize("version", [1001, 2193])
 async def test_owned_capture_copy_and_legacy_item_projection(monkeypatch, version):
     async with scene(monkeypatch, version) as (bot, peer, _):

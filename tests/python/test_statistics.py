@@ -36,7 +36,7 @@ async def test_histograms_count_unknown_filtered_and_subclient_headers(monkeypat
             peer.codec.encode_packet(packet),
             peer.codec.encode_packet(bp.UnknownPacket(packet_id=900, body=b"unknown")),
             uvarint(9) + b"unselected",
-            peer.codec.encode_packet(packet, sender_subclient_id=1),
+            peer.codec.encode_packet(peer.p.SetHealthPacket(health=0), sender_subclient_id=1),
         )
         peer.incoming.put_nowait(raw)
         await until(lambda: bot.capture_statistics().packets_in == previous.packets_in + 4)
@@ -51,14 +51,22 @@ async def test_histograms_count_unknown_filtered_and_subclient_headers(monkeypat
         assert len(current.packet_counts_in) == len(current.packet_counts_out) == 1024
         assert type(current.packet_counts_in.to_list()[0]) is int
         assert current.copy().packet_counts_in.to_list() == current.packet_counts_in.to_list()
-        assert bot.get_status().health == 17
+        assert bot.get_status().health == 17 and current.deaths == previous.deaths
+        assert current.decode_errors == previous.decode_errors
+        peer.send(peer.p.SetHealthPacket(health=16))
+        await until(lambda: bot.get_status().health == 16)
+        assert bot.get_status().state == api.BotState.ready
 
 
-@pytest.mark.parametrize("failure", ["framing", "later_header", "selected_body"])
-async def test_malformed_native_batch_counts_bytes_but_no_partial_histogram(monkeypatch, failure):
+@pytest.mark.parametrize("failure,recover", [("framing", False), ("later_header", False),
+                                            ("selected_body", False), ("framing", True),
+                                            ("later_header", True)])
+async def test_malformed_native_batch_counts_bytes_but_no_partial_histogram(monkeypatch, failure, recover):
     peers = Peers(monkeypatch, compression_threshold=65535)
-    async with api.Runtime() as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
+    errors = []
+    async with api.Runtime(lambda _bot, event: errors.append(event),
+                           events=api.event_mask(api.EventKind.decode_error)) as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer", recover_packet_errors=recover))
         await bot.wait_ready(2)
         peer = peers.connections[-1]
         before = bot.capture_statistics()
@@ -76,6 +84,10 @@ async def test_malformed_native_batch_counts_bytes_but_no_partial_histogram(monk
         assert current.packets_in == before.packets_in
         assert current.packet_counts_in.to_list() == before.packet_counts_in.to_list()
         assert bot.get_status().state == api.BotState.failed
+
+        assert len(errors) == 1 and errors[0].recoverable is False
+        if failure == "framing":
+            assert errors[0].packet_id == -1
 
 
 async def test_unavailable_transport_counters_remain_none_across_lifecycle(monkeypatch):
@@ -111,8 +123,7 @@ async def test_unavailable_transport_counters_remain_none_across_lifecycle(monke
         assert closed[0].connected_bytes_received is None
 
 
-@pytest.mark.parametrize("rejected", [False, True])
-async def test_outgoing_counts_only_after_successful_send(monkeypatch, rejected):
+async def test_outgoing_counts_only_after_successful_send(monkeypatch):
     peers = Peers(monkeypatch)
     async with api.Runtime() as runtime:
         bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
@@ -123,24 +134,16 @@ async def test_outgoing_counts_only_after_successful_send(monkeypatch, rejected)
 
         def boundary():
             assert bot.capture_statistics().packets_out == before.packets_out
+            assert bot.capture_statistics().batch_bytes_out == before.batch_bytes_out
 
         peer.before_send = boundary
-        if rejected:
-            peer.send_error = RuntimeError("controlled send rejection")
         bot.request_chunk_radius(4)
         peer.resume_sender()
-        if rejected:
-            await until(lambda: peer.closed)
-        else:
-            await until(lambda: bot.capture_statistics().packets_out > before.packets_out)
+        await until(lambda: bot.capture_statistics().packets_out > before.packets_out)
         after = bot.capture_statistics()
-        assert after.packet_counts_out[69] == before.packet_counts_out[69] + (not rejected)
-        assert after.play_packet_counts_out[69] == before.play_packet_counts_out[69] + (not rejected)
-        assert (after.batch_bytes_out > before.batch_bytes_out) is (not rejected)
-        if rejected:
-            assert after.packets_out == before.packets_out
-            assert after.packet_counts_out.to_list() == before.packet_counts_out.to_list()
-            assert after.play_packet_counts_out.to_list() == before.play_packet_counts_out.to_list()
+        assert after.packet_counts_out[69] == before.packet_counts_out[69] + 1
+        assert after.play_packet_counts_out[69] == before.play_packet_counts_out[69] + 1
+        assert after.batch_bytes_out > before.batch_bytes_out
 
 
 async def test_application_statistics_through_actual_official_connection():

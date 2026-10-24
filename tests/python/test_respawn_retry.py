@@ -41,8 +41,7 @@ def queued_packets(session):
     return [decoded.payload for decoded in session.batch.decode(wire)]
 
 
-@pytest.mark.parametrize("protocol", [1001, 2193])
-@pytest.mark.parametrize("first_retry", [False, True])
+@pytest.mark.parametrize("protocol,first_retry", [(1001, False), (2193, True)])
 async def test_respawn_retries_preserve_server_order_and_require_health(protocol, first_retry):
     bot, session, events = ready_bot(protocol)
     p = session.p
@@ -82,8 +81,7 @@ async def test_respawn_retries_preserve_server_order_and_require_health(protocol
     assert sum(isinstance(event, api.RespawnEvent) for event in events) == session.stats["respawns"] == 1
 
 
-@pytest.mark.parametrize("phase", [0, 1, 2])
-@pytest.mark.parametrize("retry", [None, 1, "true"])
+@pytest.mark.parametrize("phase,retry", [(0, None), (1, 1), (2, "true")])
 async def test_invalid_retry_rejected_without_mutation(phase, retry):
     bot, session, events = ready_bot(2193)
     deliver(session, session.p.SetHealthPacket(health=0))

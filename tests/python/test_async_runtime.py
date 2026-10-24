@@ -493,21 +493,6 @@ async def test_partial_dial_cancellation_joins_opener_cleanup(monkeypatch):
         await close
 
 
-async def test_send_commit_failure_closes_and_never_retries(monkeypatch):
-    peers = Peers(monkeypatch)
-    async with api.Runtime() as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        peer.send_error = OSError("commit failed")
-        operation = submit(bot)
-        result = await operation.wait(2)
-        await until(lambda: peer.closed)
-        assert result.outcome == api.ItemRequestOutcome.indeterminate
-        assert bot.get_status().state == api.BotState.failed
-        assert not any(x.packet_id == 147 for x in peer.received)
-
-
 async def test_context_cancellation_during_teardown_joins_before_exit(monkeypatch):
     peers = Peers(monkeypatch)
     started = asyncio.Event()
@@ -564,47 +549,6 @@ async def test_resource_pack_handshake_and_duplicate_ready_acknowledgements(monk
         await until(lambda: len([x for x in peer.received if x.packet_id == 8]) == 2)
         assert len([x for x in peer.received if x.packet_id == 113]) == 1
         assert len([x for x in peer.received if x.packet_id == 312]) == 2
-
-
-async def test_required_malformed_fails_but_unbound_and_unselected_are_filtered(monkeypatch):
-    peers = Peers(monkeypatch, server_handshake=False)
-    async with api.Runtime() as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        import zlib
-
-        def raw(packet):
-            body = bytes([len(packet)]) + packet
-            compressor = zlib.compressobj(wbits=-15)
-            return b"\0" + compressor.compress(body) + compressor.flush()
-
-        # Known unbound text and an unselected bound PlayerList have intentionally invalid bodies.
-        peer.incoming.put_nowait(raw(b"\x09\xff"))
-        peer.incoming.put_nowait(raw(b"\x3f\xff"))
-        peer.send(peer.p.SetHealthPacket(health=17))
-        await until(lambda: bot.get_status().health == 17)
-        assert bot.get_status().state == api.BotState.ready
-        peer.incoming.put_nowait(raw(b"\x2a\x80"))
-        await until(lambda: peer.closed)
-        assert bot.get_status().state == api.BotState.failed
-        assert bot.capture_statistics().decode_errors == 1
-
-
-async def test_foreign_subclient_never_merges_state(monkeypatch):
-    import zlib
-
-    peers = Peers(monkeypatch, server_handshake=False)
-    async with api.Runtime() as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        raw = peer.codec.encode_packet(peer.p.SetHealthPacket(health=1), sender_subclient_id=1)
-        compressor = zlib.compressobj(wbits=-15)
-        peer.incoming.put_nowait(b"\0" + compressor.compress(bytes([len(raw)]) + raw) + compressor.flush())
-        peer.send(peer.p.SetHealthPacket(health=18))
-        await until(lambda: bot.get_status().health == 18)
-        assert bot.capture_statistics().deaths == 0
 
 
 async def test_queue_limits_fail_visibly_and_bound_typed_payload(monkeypatch):

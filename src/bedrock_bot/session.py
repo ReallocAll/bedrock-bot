@@ -12,7 +12,7 @@ from bedrock_protocol.wire import BatchCodec, Compression
 from . import _inventory, transport
 from . import events as ev
 from ._projection import unwrap
-from .auth import build_login, create_identity
+from .auth import build_login, create_identity, derive_session_key
 from .observations import ActorSnapshot, ContainerSnapshot, InventorySnapshot, SlotObservation, Statistics
 from .operations import ItemCancellation, ItemOperation, ItemOperationPhase, ItemOperationResult, ItemRequestOutcome
 from .types import (
@@ -155,7 +155,7 @@ class Session:
         self.identity = None
         self.status = BotStatus(session_id=generation)
         self.stats = {f.name: 0 for f in fields(Statistics)
-                      if not f.name.startswith(("connected_bytes_", "batch_bytes_", "packet_counts_", "play_packet_counts_"))}
+                      if not f.name.startswith(("connected_bytes_", "packet_counts_", "play_packet_counts_"))}
         self.packet_counts_in = [0] * 1024
         self.packet_counts_out = [0] * 1024
         self.play_packet_counts_in = [0] * 1024
@@ -168,7 +168,7 @@ class Session:
         self.reason = ""
         self.disconnect_reason = None
         self.settings = self.handshake = self.login = self.start_game = self.spawn = self.initialized = False
-        self.initial_self_state = []
+        self.initial_self_state = deque()
         self.registry_observed = False
         self.registry = ()
         self.actors = {}
@@ -380,7 +380,8 @@ class Session:
                 valid = [command for command in commands if self.command_valid(command)]
                 if valid:
                     wire = self.batch.encode_prepared([command.token for command in valid])
-                    transport.validate_outbound_message(wire)
+                    if len(wire) > transport.MAX_WIRE_MESSAGE:
+                        raise ValueError("outbound wire message limit exceeded")
                     for command in valid:
                         if command.operation is not None:
                             self.item_authority.clear()
@@ -389,6 +390,7 @@ class Session:
                                 self.runtime._loop.time() + self.options.item_request_timeout_ms / 1000
                             )
                     await self.connection.send(wire)
+                    self.stats["batch_bytes_out"] += len(wire)
                     self.stats["packets_out"] += len(valid)
                     for command in valid:
                         self.packet_counts_out[command.token.packet_id] += 1
@@ -402,6 +404,9 @@ class Session:
     async def reader(self):
         while self.usable():
             data = await self.connection.recv()
+            self.stats["batch_bytes_in"] += len(data)
+            if len(data) > transport.MAX_WIRE_MESSAGE:
+                raise ValueError("inbound wire message limit exceeded")
             if not self.usable():
                 return
             try:
@@ -468,7 +473,9 @@ class Session:
             if not self.settings or self.handshake or self.login:
                 raise RuntimeError("unexpected server handshake")
             try:
-                transport.validate_server_handshake(self.identity, packet.token)
+                # DTLS protects the stream; verify the game handshake without
+                # enabling BatchCodec game-layer encryption.
+                derive_session_key(self.identity, packet.token)
             except ValueError:
                 raise _MalformedPacket("invalid server handshake") from None
             await self.flush()
@@ -998,19 +1005,14 @@ class Session:
         self.initial_self_state.append(effect)
 
     def apply_initial_self_state(self):
-        pending, self.initial_self_state = self.initial_self_state, []
-        try:
-            for effect in pending:
-                if not self.usable():
-                    return
-                if effect.runtime_id is not None and effect.runtime_id != self.status.actor_runtime_id:
-                    continue
-                if isinstance(effect, _InitialPosition):
-                    self.position(effect.position, effect.teleport, False, effect.acknowledge)
-                else:
-                    self.health(effect.value)
-        finally:
-            pending.clear()
+        while self.initial_self_state and self.usable():
+            effect = self.initial_self_state.popleft()
+            if effect.runtime_id is not None and effect.runtime_id != self.status.actor_runtime_id:
+                continue
+            if isinstance(effect, _InitialPosition):
+                self.position(effect.position, effect.teleport, False, effect.acknowledge)
+            else:
+                self.health(effect.value)
 
     def set_input(self, frame):
         self.require_ready()

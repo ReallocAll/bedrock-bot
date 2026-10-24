@@ -188,8 +188,6 @@ class Bot:
             return Statistics()
         return Statistics(
             **session.stats,
-            batch_bytes_in=0 if session.connection is None else session.connection.batch_bytes_in,
-            batch_bytes_out=0 if session.connection is None else session.connection.batch_bytes_out,
             packet_counts_in=session.packet_counts_in,
             packet_counts_out=session.packet_counts_out,
             play_packet_counts_in=session.play_packet_counts_in,

@@ -132,3 +132,5 @@ class Statistics(Record):
     connected_bytes_received: int | None = None
     packet_counts_in: ReadonlySequence[int] = field(default_factory=lambda: ReadonlySequence((0,) * 1024))
     packet_counts_out: ReadonlySequence[int] = field(default_factory=lambda: ReadonlySequence((0,) * 1024))
+    play_packet_counts_in: ReadonlySequence[int] = field(default_factory=lambda: ReadonlySequence((0,) * 1024))
+    play_packet_counts_out: ReadonlySequence[int] = field(default_factory=lambda: ReadonlySequence((0,) * 1024))

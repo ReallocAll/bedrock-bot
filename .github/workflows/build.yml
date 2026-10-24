@@ -1,0 +1,140 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: false
+      - run: uvx ruff==0.16.2 check --config pyproject.toml src
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: ReallocAll/bedrock-protocol
+          ref: main
+          path: dependency/bedrock-protocol
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: false
+      - name: Set up Windows toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio C++ tools are missing' }
+          Import-Module (Join-Path $vs 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          foreach ($name in 'INCLUDE', 'LIB', 'LIBPATH', 'PATH') {
+            $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+            if ($value) { "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          $clangBin = Join-Path $vs 'VC\Tools\Llvm\x64\bin'
+          if (-not (Test-Path -LiteralPath (Join-Path $clangBin 'clang-cl.exe'))) { throw 'clang-cl is missing' }
+          $clangBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Install build tools and configure Conan
+        run: |
+          export CONAN_HOME="$RUNNER_TEMP/conan"
+          echo "CONAN_HOME=$CONAN_HOME" >> "$GITHUB_ENV"
+          python -m pip install build cmake ninja conan-py-build==0.6.4 click griffe nanobind==3.1.0
+          mkdir -p "$CONAN_HOME/profiles"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "$GITHUB_WORKSPACE/dependency/bedrock-protocol/cmake/conan/windows-clang.profile" "$CONAN_HOME/profiles/delivery"
+          else
+            gcc_major="$(g++ -dumpfullversion | cut -d. -f1)"
+            cat > "$CONAN_HOME/profiles/delivery" <<EOF
+          [settings]
+          os=Linux
+          arch=x86_64
+          compiler=gcc
+          compiler.version=$gcc_major
+          compiler.cppstd=gnu23
+          compiler.libcxx=libstdc++11
+          build_type=Release
+          [conf]
+          tools.cmake.cmaketoolchain:generator=Ninja
+          tools.build:compiler_executables={"c":"gcc","cpp":"g++"}
+          tools.build:jobs=2
+          EOF
+          fi
+      - name: Build protocol distributions
+        run: |
+          protocol="$GITHUB_WORKSPACE/dependency/bedrock-protocol"
+          python -m build "$protocol" --outdir "$RUNNER_TEMP/protocol-pure"
+          python "$protocol/scripts/stage_native.py" "$protocol" "$RUNNER_TEMP/protocol-native-source"
+          python -m build --sdist "$RUNNER_TEMP/protocol-native-source" --outdir "$RUNNER_TEMP/protocol-native"
+          archives=("$RUNNER_TEMP"/protocol-native/*.tar.gz)
+          test "${#archives[@]}" -eq 1
+          mkdir "$RUNNER_TEMP/protocol-native-sdist"
+          python -m tarfile -e "${archives[0]}" "$RUNNER_TEMP/protocol-native-sdist" --filter data
+          sources=("$RUNNER_TEMP"/protocol-native-sdist/*)
+          test "${#sources[@]}" -eq 1
+          python -m build --wheel "${sources[0]}" --outdir "$RUNNER_TEMP/protocol-native" \
+            -C host-profile=delivery -C build-profile=delivery -C "build-dir=$RUNNER_TEMP/protocol-native-build"
+      - name: Build SDK distributions
+        run: python -m build "$GITHUB_WORKSPACE" --outdir "$RUNNER_TEMP/sdk-dist"
+      - name: Test installed SDK from its source distribution
+        run: |
+          python -m venv "$RUNNER_TEMP/sdk-consumer"
+          if [ "$RUNNER_OS" = Windows ]; then
+            consumer="$RUNNER_TEMP/sdk-consumer/Scripts/python.exe"
+          else
+            consumer="$RUNNER_TEMP/sdk-consumer/bin/python"
+          fi
+          pure=("$RUNNER_TEMP"/protocol-pure/*.whl)
+          native=("$RUNNER_TEMP"/protocol-native/*.whl)
+          sdk=("$RUNNER_TEMP"/sdk-dist/*.whl)
+          archives=("$RUNNER_TEMP"/sdk-dist/*.tar.gz)
+          test "${#pure[@]}" -eq 1
+          test "${#native[@]}" -eq 1
+          test "${#sdk[@]}" -eq 1
+          test "${#archives[@]}" -eq 1
+          "$consumer" -m pip install "${pure[0]}" "${native[0]}" "${sdk[0]}[test]"
+          "$consumer" -m pip check
+          mkdir "$RUNNER_TEMP/sdk-test-source"
+          python -m tarfile -e "${archives[0]}" "$RUNNER_TEMP/sdk-test-source" --filter data
+          sources=("$RUNNER_TEMP"/sdk-test-source/*)
+          test "${#sources[@]}" -eq 1
+          cd "${sources[0]}"
+          "$consumer" -I -W error -m pytest tests/python tests/integration/nethernet/test_transport.py
+      - name: Upload SDK distributions
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: python-sdk
+          path: |
+            ${{ runner.temp }}/sdk-dist/*.whl
+            ${{ runner.temp }}/sdk-dist/*.tar.gz
+          if-no-files-found: error

@@ -43,6 +43,7 @@ async def test_histograms_count_unknown_filtered_and_subclient_headers(monkeypat
         current = bot.capture_statistics()
         assert current.batch_bytes_in == previous.batch_bytes_in + len(raw)
         assert current.packet_counts_in[42] == previous.packet_counts_in[42] + 2
+        assert current.play_packet_counts_in[42] == previous.play_packet_counts_in[42] + 2
         assert current.packet_counts_in[900] == previous.packet_counts_in[900] + 1
         assert current.packet_counts_in[9] == previous.packet_counts_in[9] + 1
         assert sum(current.packet_counts_in) == current.packets_in
@@ -134,10 +135,12 @@ async def test_outgoing_counts_only_after_successful_send(monkeypatch, rejected)
             await until(lambda: bot.capture_statistics().packets_out > before.packets_out)
         after = bot.capture_statistics()
         assert after.packet_counts_out[69] == before.packet_counts_out[69] + (not rejected)
+        assert after.play_packet_counts_out[69] == before.play_packet_counts_out[69] + (not rejected)
         assert (after.batch_bytes_out > before.batch_bytes_out) is (not rejected)
         if rejected:
             assert after.packets_out == before.packets_out
             assert after.packet_counts_out.to_list() == before.packet_counts_out.to_list()
+            assert after.play_packet_counts_out.to_list() == before.play_packet_counts_out.to_list()
 
 
 async def test_application_statistics_through_actual_official_connection():

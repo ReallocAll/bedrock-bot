@@ -3,21 +3,30 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from enum import Enum
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Self
 
 import bedrock_protocol as bp
 
 
+@lru_cache(maxsize=128)
+def _record_field_names(record_type):
+    return tuple(field.name for field in fields(record_type))
+
+
 class Record:
     __slots__ = ()
 
     def __post_init__(self):
-        for field in fields(self):
-            value = getattr(self, field.name)
+        for name in _record_field_names(type(self)):
+            value = getattr(self, name)
+            value_type = type(value)
+            if value is None or value_type is int or value_type is float or value_type is bool or value_type is str:
+                continue
             projected = project(value)
             if value is not projected:
-                object.__setattr__(self, field.name, projected)
+                object.__setattr__(self, name, projected)
 
     def copy(self) -> Self:
         return type(self)(**{field.name: detach(getattr(self, field.name)) for field in fields(self)})
@@ -113,12 +122,15 @@ class _Payload:
         return self._native.wire_bytes()
 
 
+def _payload_protocol(value, type1001, type2193):
+    protocol = value.protocol
+    if protocol in (1001, 2193):
+        return protocol
+    return 2193 if type1001 is not type2193 and isinstance(value, type2193) else 1001
+
+
 class _Versioned(_Payload):
     __slots__ = ()
-
-    @property
-    def protocol(self) -> int:
-        return 2193 if type(self._native).__module__.endswith("v2193") else 1001
 
     def to_dict(self) -> dict[str, object]:
         return {**super().to_dict(), "protocol": self.protocol}
@@ -194,6 +206,12 @@ class ActorMetadata(_Versioned):
     _fields = ("entries",)
 
     @property
+    def protocol(self) -> int:
+        return _payload_protocol(
+            self._native, bp.v1001.SynchedActorData.CopyableDataList, bp.v2193.SynchedActorData.CopyableDataList
+        )
+
+    @property
     def entries(self) -> ReadonlySequence[MetadataEntry]:
         return ReadonlySequence(self._native.data)
 
@@ -201,6 +219,10 @@ class ActorMetadata(_Versioned):
 class ContainerOpen(_Versioned):
     __slots__ = ()
     _fields = ("container_id", "type", "pos", "entity_unique_id")
+
+    @property
+    def protocol(self) -> int:
+        return _payload_protocol(self._native, bp.v1001.ContainerOpenPacket, bp.v2193.ContainerOpenPacket)
 
 
 class UpdateTrade(_Versioned):
@@ -218,10 +240,18 @@ class UpdateTrade(_Versioned):
         "data",
     )
 
+    @property
+    def protocol(self) -> int:
+        return _payload_protocol(self._native, bp.v1001.UpdateTradePacket, bp.v2193.UpdateTradePacket)
+
 
 class ItemStackResponse(_Versioned):
     __slots__ = ()
     _fields = ("result", "client_request_id", "containers")
+
+    @property
+    def protocol(self) -> int:
+        return _payload_protocol(self._native, bp.v1001.ItemStackResponseInfo, bp.v2193.ItemStackResponseInfo)
 
 
 class ResponseContainer(_Payload):

@@ -1,12 +1,198 @@
 import asyncio
+import math
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 import bedrock_protocol as bp
 import pytest
-from peer import Peers, actor_packet, empty_item, until
+from peer import Peers, actor_packet, empty_item, slot_packet, until
+from test_respawn_retry import ready_bot
 from trade_peer import deliver, inventory_packet, scene
 
 import bedrock_bot as api
+from bedrock_bot.session import finite
+
+
+@dataclass(frozen=True, slots=True)
+class ExtraVec3(api.Vec3):
+    extra: float = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ExtraVec2(api.Vec2):
+    extra: float = 0
+
+
+@pytest.mark.parametrize("vector", [api.Vec2(), api.Vec3(), ExtraVec2(), ExtraVec3()])
+def test_finite_preserves_all_vector_fields_and_nonfinite_values(vector):
+    assert finite(vector)
+    names = ("x", "y", "z") if isinstance(vector, api.Vec3) else ("x", "y")
+    if isinstance(vector, (ExtraVec2, ExtraVec3)):
+        names += ("extra",)
+    for name in names:
+        for invalid in (float("nan"), float("inf"), -float("inf")):
+            assert not finite(replace(vector, **{name: invalid}))
+    with pytest.raises(TypeError):
+        finite(replace(vector, x="invalid", y=float("nan")))
+
+
+@dataclass(slots=True)
+class TaggedInput(api.Input):
+    tag: str = "retained"
+
+
+@pytest.mark.parametrize("input_type", [api.Input, TaggedInput])
+async def test_input_copy_is_independent_and_keeps_all_fields_and_subclass_layout(input_type):
+    bot, session, _ = ready_bot(2193)
+    frame = input_type(position=api.Vec3(1, 2, 3), delta=api.Vec3(4, 5, 6), move=api.Vec2(-1, 1),
+                       pitch=-0.0, yaw=75, vertical_collision=False)
+    bot.set_input(frame)
+    captured = session.input
+    assert captured is not frame and type(captured) is input_type
+    frame.position = frame.delta = api.Vec3(99, 99, 99)
+    frame.move = api.Vec2()
+    frame.pitch = frame.yaw = 999
+    frame.vertical_collision = True
+    if isinstance(frame, TaggedInput):
+        frame.tag = "changed"
+        assert captured.tag == "retained"
+    assert captured.position == api.Vec3(1, 2, 3) and captured.delta == api.Vec3(4, 5, 6)
+    assert captured.move == api.Vec2(-1, 1) and math.copysign(1, captured.pitch) == -1
+    assert captured.yaw == 75 and captured.vertical_collision is False
+    with pytest.raises(ValueError, match="finite"):
+        bot.set_input(api.Input(position=ExtraVec3(extra=float("inf"))))
+    assert session.input is captured
+
+
+@pytest.mark.parametrize("protocol", [1001, 2193])
+@pytest.mark.parametrize("coordinates", [None, (-0.0, 8.0, -9.0)])
+async def test_delta_actor_motion_preserves_axis_values_identity_and_retained_snapshot(protocol, coordinates):
+    _, session, events = ready_bot(protocol)
+    actor = api.ActorSnapshot(91, -92, "minecraft:player", api.Vec3(0.0, 2, 3))
+    session.add_actor(actor)
+    events.clear()
+    values = dict(runtime_id=91, new_position_x=None, new_position_y=None, new_position_z=None,
+                  rot_x=None, rot_y=None, rot_y_head=None)
+    if coordinates is not None:
+        values.update(zip(("new_position_x", "new_position_y", "new_position_z"), coordinates))
+    if protocol == 1001:
+        values["header"] = 0 if coordinates is None else 7
+    else:
+        values.update(is_on_ground=False, force_move=False, force_move_local_entity=False,
+                      force_completion=False, ticks=1)
+    p = session.p
+    packet = p.MoveActorDeltaPacket(move_data=p.MoveActorDeltaData(**values))
+    session.handle_state(session.codec.decode_packet(session.codec.encode_packet(packet)).payload)
+    current = session.actors[91]
+    if coordinates is None:
+        assert current.position is actor.position
+    else:
+        assert current.position == api.Vec3(*coordinates)
+        assert math.copysign(1, current.position.x) == -1
+    assert actor.position == api.Vec3(0.0, 2, 3) and math.copysign(1, actor.position.x) == 1
+    assert [type(event) for event in events] == [api.ActorMotionEvent, api.ActorEvent]
+
+
+async def test_health_callbacks_observe_final_status_and_keep_death_respawn_event_order():
+    bot, session, events = ready_bot(2193)
+    metadata = replace(session.status, tick=7, chunk_radius=10, selected_hotbar=4)
+    session.status = metadata
+    observations = []
+
+    def emit(_bot, _kind, factory):
+        event = factory()
+        events.append(event)
+        observations.append((type(event), bot.get_status()))
+
+    session.runtime._emit = emit
+    session.health(0)
+    assert [type(event) for event in events] == [api.DeathEvent, api.HealthEvent]
+    assert all(not status.alive and status.health == 0 and status.selected_hotbar is None
+               for _, status in observations)
+    assert metadata.alive and metadata.health == 20 and metadata.selected_hotbar == 4
+    assert session.status.tick == 7 and session.status.chunk_radius == 10
+    retained = session.status
+    events.clear()
+    observations.clear()
+    session.respawn_phase = 2
+    session.health(20)
+    assert [type(event) for event in events] == [api.RespawnEvent, api.HealthEvent]
+    assert all(status.alive and status.health == 20 for _, status in observations)
+    assert not retained.alive and retained.health == 0
+
+
+@pytest.mark.parametrize("protocol", [1001, 2193])
+async def test_inventory_slot_absent_and_present_fallbacks_keep_owned_captures(protocol):
+    _, session, _ = ready_bot(protocol)
+    p = session.p
+
+    def deliver_slot(index):
+        packet = slot_packet(p, index)
+        session.handle_state(session.codec.decode_packet(session.codec.encode_packet(packet)).payload)
+
+    deliver_slot(0)
+    first = session.inventories[0]
+    assert not first.complete and first.full_container_name is None and first.storage_item is None
+    assert set(first.slots) == {0}
+    name = p.FullContainerName(name=p.ContainerEnumName(7), dynamic_id=42)
+    previous = api.InventorySnapshot({0: empty_item(p), 2: empty_item(p)}, True, name, empty_item(p))
+    session.inventories[0] = previous
+    deliver_slot(1)
+    current = session.inventories[0]
+    assert current.complete and set(current.slots) == {0, 1, 2}
+    assert current.full_container_name is previous.full_container_name
+    assert current.storage_item is previous.storage_item
+    assert current.full_container_name.to_dict() == {"name": 7, "dynamic_id": 42}
+    assert set(previous.slots) == {0, 2} and set(first.slots) == {0}
+
+
+@pytest.mark.parametrize("invalidation", ["correction", "teleport", "dimension", "death"])
+async def test_prepared_input_epoch_is_invalidated_before_transmission(monkeypatch, invalidation):
+    peers = Peers(monkeypatch)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
+        await bot.wait_ready(2)
+        peer = peers.connections[-1]
+        p = peer.p
+        peer.pause_sender(bot)
+        bot.set_input(api.Input(position=api.Vec3(99, 99, 99)))
+        bot._session.tick()
+        stale_tick = bot.get_status().tick
+        if invalidation == "correction":
+            packet = correction(p)
+        elif invalidation == "teleport":
+            packet = p.MovePlayerPacket(
+                player_id=bot.get_status().actor_runtime_id, pos=p.Vec3(x=4, y=5, z=6), rot=p.Vec2(x=0, y=0),
+                y_head_rot=0, reset_position=p.PlayerPositionModeComponent.PositionMode.TELEPORT,
+                on_ground=True, riding_id=0, teleport_data=p.MovePlayerTeleportData(cause=0, source_entity_type=0),
+                tick=1,
+            )
+        elif invalidation == "dimension":
+            packet = p.ChangeDimensionPacket(dimension_id=1, pos=p.Vec3(x=4, y=5, z=6),
+                                             respawn=False, loading_screen_id=42)
+        else:
+            packet = p.SetHealthPacket(health=0)
+        epoch = bot._session.input_epoch
+        peer.send(packet)
+        await until(lambda: bot._session.input_epoch != epoch)
+        if invalidation == "death":
+            bot.respawn()
+            peer.send(
+                p.RespawnPacket(pos=p.Vec3(x=4, y=5, z=6), state=p.PlayerRespawnState.READY_TO_SPAWN, runtime_id=2),
+                p.SetHealthPacket(health=20),
+            )
+            await until(lambda: bot.get_status().alive)
+        elif invalidation == "dimension":
+            bot._session.dimension_deadline = bot._runtime._loop.time()
+            bot._session.tick()
+        bot.set_input(api.Input(position=api.Vec3(7, 8, 9)))
+        bot._session.tick()
+        valid_tick = bot.get_status().tick
+        peer.resume_sender()
+        await bot._session.flush()
+        inputs = [packet for packet in peer.received if packet.packet_id == 144]
+        assert all(packet.client_tick != stale_tick and packet.pos.x != 99 for packet in inputs)
+        assert any(packet.client_tick == valid_tick and packet.pos.x == 7 for packet in inputs)
 
 
 async def test_disconnect_before_session_and_after_runtime_stop(monkeypatch):
@@ -62,9 +248,9 @@ async def test_connecting_callback_invalidates_before_identity_and_dial(monkeypa
     identities = []
     original = session.create_identity
 
-    def create_identity(*args):
+    def create_identity(*args, **kwargs):
         identities.append(args)
-        return original(*args)
+        return original(*args, **kwargs)
 
     monkeypatch.setattr(session, "create_identity", create_identity)
     changed = asyncio.Event()

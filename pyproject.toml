@@ -7,8 +7,10 @@ name = "bedrock-bot"
 version = "0.2.0.dev0"
 description = "Typed asynchronous Bedrock bots over NetherNet"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
-    "bedrock-protocol==0.5.0.dev0",
+    "bedrock-protocol-native==0.5.0.dev0",
     "nethernet[http] @ git+https://github.com/ReallocAll/nethernet-python.git@1fd9b9907e602c3b906ad45abe856ea8e9358861",
     "aiortc==1.15.0",
     "aioice==0.10.2",
@@ -21,11 +23,26 @@ test = ["pytest>=8", "pytest-asyncio>=1.4"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/bedrock_bot"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/bedrock_bot/**",
+    "/tests/python/**",
+    "/tests/conftest.py",
+    "/tests/integration/nethernet/test_transport.py",
+    "/examples/*.py",
+    "/README.md",
+    "/docs/api.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+exclude = ["**/__pycache__/**", "**/*.py[cod]"]
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -33,4 +50,4 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-extend-select = ["I", "F"]
+select = ["E4", "E7", "E9", "F", "I"]

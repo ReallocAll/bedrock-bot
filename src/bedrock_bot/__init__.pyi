@@ -2,6 +2,52 @@ from collections.abc import Awaitable, Callable, Iterable
 from types import TracebackType
 from typing import Literal, Self
 
+from bedrock_protocol import BinaryView as BinaryView
+from bedrock_protocol import Nbt as Nbt
+from bedrock_protocol import NbtType as NbtType
+from bedrock_protocol.v1001 import BlockPos as BlockPos
+from bedrock_protocol.v1001 import PropertySyncData as PropertySyncData
+from bedrock_protocol.v1001 import RedactableString as _RedactableString1001
+from bedrock_protocol.v1001 import SyncedAttribute as SyncedAttribute
+from bedrock_protocol.v2193 import RedactableString as _RedactableString2193
+
+from ._projection import (
+    ActorLink as ActorLink,
+)
+from ._projection import (
+    ActorMetadata as ActorMetadata,
+)
+from ._projection import (
+    ActorSignal as ActorSignal,
+)
+from ._projection import (
+    ContainerOpen as ContainerOpen,
+)
+from ._projection import (
+    FullContainerName as FullContainerName,
+)
+from ._projection import (
+    ItemDescriptor as ItemDescriptor,
+)
+from ._projection import (
+    ItemStackResponse as ItemStackResponse,
+)
+from ._projection import MetadataEntry1001 as MetadataEntry1001
+from ._projection import MetadataEntry2193 as MetadataEntry2193
+from ._projection import (
+    ReadonlyMap,
+    ReadonlySequence,
+)
+from ._projection import (
+    RegistryItem as RegistryItem,
+)
+from ._projection import ResponseContainer1001 as ResponseContainer1001
+from ._projection import ResponseContainer2193 as ResponseContainer2193
+from ._projection import ResponseSlot1001 as ResponseSlot1001
+from ._projection import ResponseSlot2193 as ResponseSlot2193
+from ._projection import (
+    UpdateTrade as UpdateTrade,
+)
 from .events import ALL_EVENTS as ALL_EVENTS
 from .events import DEFAULT_EVENTS as DEFAULT_EVENTS
 from .events import LEGACY_EVENTS as LEGACY_EVENTS
@@ -11,6 +57,7 @@ from .events import ActorSignalEvent as ActorSignalEvent
 from .events import ChunkEvent as ChunkEvent
 from .events import ContainerEvent as ContainerEvent
 from .events import DeathEvent as DeathEvent
+from .events import DecodeErrorEvent as DecodeErrorEvent
 from .events import DimensionEvent as DimensionEvent
 from .events import Event as Event
 from .events import EventKind as EventKind
@@ -20,6 +67,7 @@ from .events import InventorySlotEvent as InventorySlotEvent
 from .events import ItemRegistryEvent as ItemRegistryEvent
 from .events import ItemRequestEvent as ItemRequestEvent
 from .events import LatencyEvent as LatencyEvent
+from .events import PacketDecodedEvent as PacketDecodedEvent
 from .events import PositionEvent as PositionEvent
 from .events import RespawnEvent as RespawnEvent
 from .events import StateEvent as StateEvent
@@ -33,6 +81,7 @@ from .observations import ItemRegistrySnapshot as ItemRegistrySnapshot
 from .observations import SlotObservation as SlotObservation
 from .observations import Snapshot as Snapshot
 from .observations import Statistics as Statistics
+from .observations import TradeOffers as TradeOffers
 from .operations import ItemCancellation as ItemCancellation
 from .operations import ItemOperation as ItemOperation
 from .operations import ItemOperationPhase as ItemOperationPhase
@@ -49,7 +98,11 @@ from .types import InventorySlot as InventorySlot
 from .types import ItemCount as ItemCount
 from .types import ItemRequestKey as ItemRequestKey
 from .types import ObservedEntity as ObservedEntity
+from .types import ServerDisconnectReason as ServerDisconnectReason
 from .types import SlotState as SlotState
+from .types import TradeItem as TradeItem
+from .types import TradeOffer as TradeOffer
+from .types import TradeOfferRef as TradeOfferRef
 from .types import TradeWindowObservation as TradeWindowObservation
 from .types import Vec2 as Vec2
 from .types import Vec3 as Vec3
@@ -110,59 +163,9 @@ class Bot:
     def request_chunk_radius(self, radius: int) -> None: ...
     def report_blob_status(self, missing: Iterable[int], present: Iterable[int] = ()) -> None: ...
     def request_sub_chunks(self, dimension: int, chunk_x: int, chunk_z: int, heights: Iterable[int]) -> None: ...
-    def respawn(self) -> None: ...
+    def respawn(self, *, retry: bool = False) -> None: ...
     def probe_latency(self) -> None: ...
 
-from bedrock_protocol import BinaryView as BinaryView
-from bedrock_protocol import Nbt as Nbt
-from bedrock_protocol import NbtType as NbtType
-from bedrock_protocol.v1001 import BlockPos as BlockPos
-from bedrock_protocol.v1001 import PropertySyncData as PropertySyncData
-from bedrock_protocol.v1001 import RedactableString as _RedactableString1001
-from bedrock_protocol.v1001 import SyncedAttribute as SyncedAttribute
-from bedrock_protocol.v2193 import RedactableString as _RedactableString2193
-
-from ._projection import (
-    ActorLink as ActorLink,
-)
-from ._projection import (
-    ActorMetadata as ActorMetadata,
-)
-from ._projection import (
-    ActorSignal as ActorSignal,
-)
-from ._projection import (
-    ContainerOpen as ContainerOpen,
-)
-from ._projection import (
-    FullContainerName as FullContainerName,
-)
-from ._projection import (
-    ItemDescriptor as ItemDescriptor,
-)
-from ._projection import (
-    ItemStackResponse as ItemStackResponse,
-)
-from ._projection import MetadataEntry1001 as MetadataEntry1001
-from ._projection import MetadataEntry2193 as MetadataEntry2193
-from ._projection import (
-    ReadonlyMap,
-    ReadonlySequence,
-)
-from ._projection import (
-    RegistryItem as RegistryItem,
-)
-from ._projection import ResponseContainer1001 as ResponseContainer1001
-from ._projection import ResponseContainer2193 as ResponseContainer2193
-from ._projection import ResponseSlot1001 as ResponseSlot1001
-from ._projection import ResponseSlot2193 as ResponseSlot2193
-from ._projection import (
-    UpdateTrade as UpdateTrade,
-)
-from .observations import TradeOffers as TradeOffers
-from .types import TradeItem as TradeItem
-from .types import TradeOffer as TradeOffer
-from .types import TradeOfferRef as TradeOfferRef
 
 type IntProperty = PropertySyncData.PropertySyncIntEntry
 type FloatProperty = PropertySyncData.PropertySyncFloatEntry

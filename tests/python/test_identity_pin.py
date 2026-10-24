@@ -107,6 +107,7 @@ async def test_session_opener_identity_is_the_login_identity_and_refreshes_on_re
             if index:
                 await bot.reconnect()
             await bot.wait_ready(2)
+            assert bot._session.connection is peers[index].connection
             packet = next(packet for packet in peers[index].received if packet.packet_id == 1)
             same_token = hmac.compare_digest(
                 envelope(packet.connection_request.to_bytes())["Token"], identities[index].token
@@ -136,9 +137,9 @@ async def test_identity_is_created_after_long_start_delay(monkeypatch, cancel_be
         else:
             await original_sleep(seconds)
 
-    def timed_identity(name, uuid):
+    def timed_identity(name, uuid, **kwargs):
         creation_times.append(now)
-        return create_identity(name, uuid)
+        return create_identity(name, uuid, **kwargs)
 
     async def open_connection(options, identity):
         identities.append(identity)

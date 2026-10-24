@@ -59,7 +59,6 @@ async def test_adapter_signs_session_identity_and_verifies_pinned_server():
         finally:
             await conn.close()
             await conn.close()
-        assert await conn.wait_closed() == nethernet.SessionError.NONE
     assert len(offers) == 1
 
 

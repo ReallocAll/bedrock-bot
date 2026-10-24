@@ -48,8 +48,19 @@ class BotOptions:
     spawn_timeout_ms: int = 60000
     item_request_timeout_ms: int = 5000
     server_key_sha256: str = ""
+    load_screen: bool = True
+    validate_all_packets: bool = False
+    recover_packet_errors: bool = False
+    xuid: str = ""
 
     def _validate(self) -> None:
+        for name in ("load_screen", "validate_all_packets", "recover_packet_errors"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be a boolean")
+        if not isinstance(self.xuid, str) or (
+            self.xuid and (not re.fullmatch(r"[0-9]{1,20}", self.xuid) or int(self.xuid) > (1 << 64) - 1)
+        ):
+            raise ValueError("xuid must be empty or an ASCII decimal unsigned 64-bit integer of at most 20 digits")
         if not isinstance(self.server_key_sha256, str) or (
             self.server_key_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", self.server_key_sha256)
         ):
@@ -97,6 +108,13 @@ class Input:
 
 class BotToken:
     __slots__ = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ServerDisconnectReason(Record):
+    reason_code: int
+    message: str | None = None
+    filtered_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

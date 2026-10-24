@@ -1,7 +1,9 @@
 import asyncio
 from types import SimpleNamespace
 
+import bedrock_protocol as bp
 import pytest
+from bedrock_protocol.wire import Compression
 from peer import Peers, submit, until
 
 import bedrock_bot as api
@@ -24,13 +26,13 @@ async def test_encoding_failure_invalidates_session(monkeypatch, protocol, stage
             raise error
 
         if stage == "admission":
-            session.codec = SimpleNamespace(encode_packet=fail)
+            session.codec = SimpleNamespace(prepare_packet=fail)
             with pytest.raises(ValueError) as caught:
                 bot.request_chunk_radius(4)
             assert caught.value is error
             assert not session.usable()
         else:
-            session.batch = SimpleNamespace(encode=fail, decode=session.batch.decode)
+            session.batch = SimpleNamespace(encode_prepared=fail, decode=session.batch.decode)
             bot.request_chunk_radius(4)
         await until(lambda: peer.closed)
         assert bot.get_status().state == api.BotState.failed
@@ -76,7 +78,8 @@ async def test_complete_wire_message_limit_invalidates_session(monkeypatch, dire
         peer = peers.connections[-1]
         monkeypatch.setattr(transport, "MAX_WIRE_MESSAGE", 10)
         if direction == "send":
-            bot._session.batch = SimpleNamespace(encode=lambda packets: b"x" * 11, decode=bot._session.batch.decode)
+            bot._session.batch = SimpleNamespace(encode_prepared=lambda packets: b"x" * 11,
+                                                decode=bot._session.batch.decode)
             bot.request_chunk_radius(4)
         else:
             peer.incoming.put_nowait(b"x" * 11)
@@ -98,3 +101,85 @@ async def test_disconnect_resolves_pending_batch_boundary(monkeypatch):
         assert boundary.done()
         with pytest.raises(asyncio.CancelledError):
             await boundary
+
+
+async def test_outbound_message_limit_rejects_before_item_submission(monkeypatch):
+    peers = Peers(monkeypatch)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
+        await bot.wait_ready(2)
+        peer = peers.connections[-1]
+        before = bot.capture_statistics()
+        monkeypatch.setattr(transport, "MAX_WIRE_MESSAGE", 1)
+        operation = submit(bot)
+        result = await operation.wait(2)
+        await until(lambda: peer.closed)
+        assert result.outcome == api.ItemRequestOutcome.cancelled
+        assert not any(packet.packet_id == 147 for packet in peer.received)
+        assert bot.capture_statistics().packets_out == before.packets_out
+
+
+async def test_preparation_error_precedes_queue_capacity_failure(monkeypatch):
+    peers = Peers(monkeypatch)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
+        await bot.wait_ready(2)
+        peer = peers.connections[-1]
+        peer.pause_sender(bot)
+        monkeypatch.setattr(transport, "COMMAND_PACKETS", 0)
+        with pytest.raises(bp.EncodeError) as caught:
+            bot._session.enqueue(object())
+        assert bot._session.error is caught.value
+        assert caught.value.reason == "packet_type_unavailable"
+        assert "queue limit" not in bot._session.reason
+        await until(lambda: peer.closed)
+
+
+@pytest.mark.parametrize("protocol", [1001, 2193])
+async def test_prepared_tokens_keep_exact_queue_byte_charges_until_cleanup(monkeypatch, protocol):
+    peers = Peers(monkeypatch)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer", protocol=protocol))
+        await bot.wait_ready(2)
+        peer = peers.connections[-1]
+        peer.pause_sender(bot)
+        session = bot._session
+        packet = peer.p.RequestChunkRadiusPacket(chunk_radius=4, max_chunk_radius=4)
+        size = len(session.codec.prepare_packet(packet)) + 5
+        monkeypatch.setattr(transport, "COMMAND_BYTES", size * 2)
+        session.enqueue(packet)
+        session.enqueue(packet)
+        assert session.queue_bytes == size * 2 and session.queue_packets == 2
+        assert all(command.token.protocol == protocol and command.token.packet_id == 69
+                   and command.size == len(command.token) + 5 for command in session.queue)
+        with pytest.raises(RuntimeError, match="queue limit"):
+            session.enqueue(packet)
+        assert session.queue_bytes == size * 2 and session.queue_packets == 2
+        await until(lambda: peer.closed)
+        assert session.queue_bytes == session.queue_packets == 0
+
+
+async def test_prepared_packets_follow_fifo_compression_boundary(monkeypatch):
+    peers = Peers(monkeypatch, compression_threshold=1)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
+        await bot.wait_ready(2)
+        peer = peers.connections[-1]
+        session = bot._session
+        peer.pause_sender(bot)
+        before = len(peer.received_wire)
+        bot.request_chunk_radius(4)
+
+        def change_compression():
+            session.batch.set_compression(Compression.ZLIB, 65535)
+            peer.batch.set_compression(Compression.ZLIB, 65535)
+
+        boundary = asyncio.create_task(session.flush(change_compression))
+        await asyncio.sleep(0)
+        bot.request_chunk_radius(5)
+        peer.resume_sender()
+        await boundary
+        await until(lambda: any(packet.packet_id == 69 and packet.chunk_radius == 5 for packet in peer.received))
+        wires = peer.received_wire[before:]
+        assert wires[0][0] == 0 and wires[1][0] == 255
+        assert [packet.chunk_radius for packet in peer.received if packet.packet_id == 69][-2:] == [4, 5]

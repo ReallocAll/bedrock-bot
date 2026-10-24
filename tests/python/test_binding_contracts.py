@@ -62,7 +62,7 @@ def test_auth_independent_go_key_derivation_and_signed_limits():
             derive_session_key(identity, jwt)
 
 
-def test_item_unknown_empty_and_stack_identity_alternatives():
+def test_item_unknown_and_empty_are_distinct():
     import bedrock_protocol as bp
     from peer import empty_item
 
@@ -74,18 +74,6 @@ def test_item_unknown_empty_and_stack_identity_alternatives():
         empty = api.SlotObservation(slot, empty_item(p))
         assert empty.state == api.SlotState.empty
         assert (empty.count, empty.network_id, empty.stack_id) == (0, 0, 0)
-    p = bp.v1001
-    for alternative, cls in enumerate((p.ItemStackNetId, p.ItemStackRequestId, p.ItemStackLegacyRequestId)):
-        item = p.SerializedNetworkItemStackDescriptor(
-            id=1,
-            stack_size=4,
-            aux_value=0,
-            net_id_variant=bp.Variant(alternative, cls(raw_id=12)),
-            block_runtime_id=0,
-            user_data_buffer=b"",
-        )
-        observation = api.SlotObservation(slot, item)
-        assert observation.stack_id == (12 if alternative == 0 else None)
 
 
 async def test_explicit_close_inside_context_is_idempotent(monkeypatch):

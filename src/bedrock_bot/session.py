@@ -5,7 +5,6 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass, fields, replace
-from types import MappingProxyType
 
 import bedrock_protocol as bp
 from bedrock_protocol.wire import BatchCodec, Compression
@@ -13,7 +12,7 @@ from bedrock_protocol.wire import BatchCodec, Compression
 from . import _inventory, transport
 from . import events as ev
 from ._projection import unwrap
-from .auth import build_login, create_identity, derive_session_key
+from .auth import build_login, create_identity
 from .observations import ActorSnapshot, ContainerSnapshot, InventorySnapshot, SlotObservation, Statistics
 from .operations import ItemCancellation, ItemOperation, ItemOperationPhase, ItemOperationResult, ItemRequestOutcome
 from .types import (
@@ -24,6 +23,7 @@ from .types import (
     InventorySlot,
     ItemCount,
     ItemRequestKey,
+    ServerDisconnectReason,
     SlotState,
     TradeWindowObservation,
     Vec2,
@@ -92,7 +92,14 @@ def vec(value):
 
 def finite(*values):
     for value in values:
-        if isinstance(value, (Vec3, Vec2)):
+        value_type = type(value)
+        if value_type is Vec3:
+            if not (math.isfinite(value.x) and math.isfinite(value.y) and math.isfinite(value.z)):
+                return False
+        elif value_type is Vec2:
+            if not (math.isfinite(value.x) and math.isfinite(value.y)):
+                return False
+        elif isinstance(value, (Vec3, Vec2)):
             if not all(math.isfinite(getattr(value, f.name)) for f in fields(value)):
                 return False
         elif not math.isfinite(value):
@@ -106,8 +113,9 @@ def owned(value):
 
 @dataclass(slots=True)
 class _Command:
-    packet: object
+    token: bp.EncodedPacket
     size: int
+    play: bool
     operation: object = None
     valid: object = None
 
@@ -116,6 +124,20 @@ class _Command:
 class _Boundary:
     future: asyncio.Future
     change: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class _InitialPosition:
+    runtime_id: int
+    position: Vec3
+    teleport: bool
+    acknowledge: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _InitialHealth:
+    runtime_id: int | None
+    value: float
 
 
 class Session:
@@ -133,16 +155,20 @@ class Session:
         self.identity = None
         self.status = BotStatus(session_id=generation)
         self.stats = {f.name: 0 for f in fields(Statistics)
-                      if not f.name.startswith(("connected_bytes_", "packet_counts_"))}
+                      if not f.name.startswith(("connected_bytes_", "batch_bytes_", "packet_counts_", "play_packet_counts_"))}
         self.packet_counts_in = [0] * 1024
         self.packet_counts_out = [0] * 1024
+        self.play_packet_counts_in = [0] * 1024
+        self.play_packet_counts_out = [0] * 1024
         self.connection = None
         self.active = True
         self.finished = False
         self.started = self.cleaning = False
         self.error = None
         self.reason = ""
+        self.disconnect_reason = None
         self.settings = self.handshake = self.login = self.start_game = self.spawn = self.initialized = False
+        self.initial_self_state = []
         self.registry_observed = False
         self.registry = ()
         self.actors = {}
@@ -183,12 +209,14 @@ class Session:
 
     def state(self, state, reason=""):
         self.status = replace(self.status, state=state)
-        self.emit(ev.EventKind.state, lambda: ev.StateEvent(state, reason))
+        self.emit(ev.EventKind.state, lambda: ev.StateEvent(state, reason, self.disconnect_reason))
 
     def lifecycle_state(self, state):
         self.status = replace(self.status, state=state)
         try:
-            self.runtime._emit(self.bot, ev.EventKind.state, lambda: ev.StateEvent(state, self.reason))
+            self.runtime._emit(
+                self.bot, ev.EventKind.state, lambda: ev.StateEvent(state, self.reason, self.disconnect_reason)
+            )
         except BaseException as error:
             self.runtime._background_failure(error)
 
@@ -220,7 +248,7 @@ class Session:
             self.state(BotState.connecting)
             if not self.usable():
                 return
-            self.identity = create_identity(self.options.name, self.options.uuid)
+            self.identity = create_identity(self.options.name, self.options.uuid, xuid=self.options.xuid)
             async with asyncio.timeout(self.options.connect_timeout_ms / 1000):
                 self.connection = await transport._open_connection(self.options, self.identity)
             if not self.usable():
@@ -270,6 +298,7 @@ class Session:
                 if isinstance(command, _Boundary) and not command.future.done():
                     command.future.cancel()
             self.queue.clear()
+            self.initial_self_state.clear()
             self.queue_bytes = self.queue_packets = 0
             self.actors.clear()
             self.unique_ids.clear()
@@ -305,7 +334,8 @@ class Session:
         if not self.usable():
             raise RuntimeError("session is closing")
         try:
-            size = len(self.codec.encode_packet(packet)) + 5
+            token = self.codec.prepare_packet(packet)
+            size = len(token) + 5
         except BaseException as error:
             self.fail(error)
             raise
@@ -313,7 +343,7 @@ class Session:
             error = RuntimeError("outbound queue limit exceeded")
             self.fail(error)
             raise error
-        self.queue.append(_Command(packet, size, operation, valid))
+        self.queue.append(_Command(token, size, self.initialized, operation, valid))
         self.queue_bytes += size
         self.queue_packets += 1
         self.send_event.set()
@@ -349,9 +379,8 @@ class Session:
                     commands.append(command)
                 valid = [command for command in commands if self.command_valid(command)]
                 if valid:
-                    wire = self.batch.encode([command.packet for command in valid])
-                    if len(wire) > transport.MAX_WIRE_MESSAGE:
-                        raise ValueError("outbound wire message limit exceeded")
+                    wire = self.batch.encode_prepared([command.token for command in valid])
+                    transport.validate_outbound_message(wire)
                     for command in valid:
                         if command.operation is not None:
                             self.item_authority.clear()
@@ -360,10 +389,11 @@ class Session:
                                 self.runtime._loop.time() + self.options.item_request_timeout_ms / 1000
                             )
                     await self.connection.send(wire)
-                    self.stats["batch_bytes_out"] += len(wire)
                     self.stats["packets_out"] += len(valid)
                     for command in valid:
-                        self.packet_counts_out[command.packet.packet_id] += 1
+                        self.packet_counts_out[command.token.packet_id] += 1
+                        if command.play:
+                            self.play_packet_counts_out[command.token.packet_id] += 1
                 for command in commands:
                     assert self.queue.popleft() is command
                     self.queue_bytes -= command.size
@@ -374,27 +404,49 @@ class Session:
             data = await self.connection.recv()
             if not self.usable():
                 return
-            self.stats["batch_bytes_in"] += len(data)
-            if len(data) > transport.MAX_WIRE_MESSAGE:
-                raise ValueError("inbound wire message limit exceeded")
             try:
-                batch = self.batch.decode(data, packet_ids=REQUIRED_IDS)
-            except bp.ProtocolError:
-                self.stats["decode_errors"] += 1
+                batch = self.batch.decode(
+                    data,
+                    packet_ids=None if self.options.validate_all_packets else REQUIRED_IDS,
+                    recover_packet_errors=self.options.recover_packet_errors,
+                )
+            except bp.ProtocolError as error:
+                packet_id = getattr(error, "packet_id", None)
+                self.decode_error(-1 if packet_id is None else packet_id, str(error), recoverable=False)
                 raise
             self.stats["packets_in"] += batch.packet_count
-            for header in batch.headers:
+            headers = batch.headers
+            for header in headers:
                 self.packet_counts_in[header.packet_id] += 1
-            for decoded in batch:
+            decoded_packets = iter(batch)
+            decode_errors = batch.errors
+            errors = {error.packet_index: error for error in decode_errors} if decode_errors else None
+            for packet_index, header in enumerate(headers):
+                if not self.usable():
+                    return
+                if errors is not None and packet_index in errors:
+                    error = errors[packet_index]
+                    self.decode_error(header.packet_id, error.reason, recoverable=True)
+                    continue
+                if not self.options.validate_all_packets and header.packet_id not in REQUIRED_IDS:
+                    continue
+                decoded = next(decoded_packets)
+                if self.initialized:
+                    self.play_packet_counts_in[decoded.header.packet_id] += 1
+                self.emit(ev.EventKind.packet_decoded, lambda: ev.PacketDecodedEvent(decoded))
                 if not self.usable():
                     return
                 if decoded.header.sender_subclient_id or decoded.header.target_subclient_id:
                     continue
                 try:
                     await self.handle(decoded.payload)
-                except _MalformedPacket:
-                    self.stats["decode_errors"] += 1
+                except _MalformedPacket as error:
+                    self.decode_error(decoded.header.packet_id, str(error), recoverable=False)
                     raise
+
+    def decode_error(self, packet_id, reason, *, recoverable):
+        self.stats["decode_errors"] += 1
+        self.emit(ev.EventKind.decode_error, lambda: ev.DecodeErrorEvent(packet_id, reason, recoverable))
 
     async def handle(self, packet):
         p = self.p
@@ -416,7 +468,7 @@ class Session:
             if not self.settings or self.handshake or self.login:
                 raise RuntimeError("unexpected server handshake")
             try:
-                derive_session_key(self.identity, packet.token)
+                transport.validate_server_handshake(self.identity, packet.token)
             except ValueError:
                 raise _MalformedPacket("invalid server handshake") from None
             await self.flush()
@@ -462,6 +514,7 @@ class Session:
             self.input = self.look = None
             self.input_epoch += 1
             self.start_game = True
+            self.apply_initial_self_state()
             await self.try_ready()
         elif id == 162:
             self.registry = packet.items.copy()
@@ -473,7 +526,18 @@ class Session:
             self.status = replace(self.status, chunk_radius=packet.chunk_radius)
             await self.try_ready()
         elif id == 5:
-            raise RuntimeError("server Disconnect packet")
+            messages = packet.messages.value
+            self.disconnect_reason = ServerDisconnectReason(
+                int(packet.reason),
+                None if messages is None else messages.message,
+                None if messages is None else messages.filtered_message,
+            )
+            reason = next(
+                (text for text in (self.disconnect_reason.message, self.disconnect_reason.filtered_message)
+                 if text and text.strip()),
+                f"server Disconnect packet (reason {self.disconnect_reason.reason_code})",
+            )
+            raise RuntimeError(reason)
         else:
             self.handle_state(packet)
 
@@ -486,19 +550,24 @@ class Session:
             or self.status.chunk_radius <= 0
         ):
             return
-        self.initialized = True
         p = self.p
         self.enqueue(p.SetLocalPlayerAsInitializedPacket(player_id=self.status.actor_runtime_id))
-        self.enqueue(
-            p.RequestChunkRadiusPacket(
-                chunk_radius=self.options.chunk_radius, max_chunk_radius=self.options.chunk_radius
+        await self.flush()
+        if not self.usable():
+            return
+        self.initialized = True
+        if self.options.chunk_radius != 16:
+            self.enqueue(
+                p.RequestChunkRadiusPacket(
+                    chunk_radius=self.options.chunk_radius, max_chunk_radius=self.options.chunk_radius
+                )
             )
-        )
-        for mode in (
-            p.ServerboundLoadingScreenPacketType.START_LOADING_SCREEN,
-            p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
-        ):
-            self.enqueue(p.ServerboundLoadingScreenPacket(loading_screen_packet_type=mode, loading_screen_id=None))
+        if self.options.load_screen:
+            for mode in (
+                p.ServerboundLoadingScreenPacketType.START_LOADING_SCREEN,
+                p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
+            ):
+                self.enqueue(p.ServerboundLoadingScreenPacket(loading_screen_packet_type=mode, loading_screen_id=None))
         await self.flush()
         if self.usable():
             self.next_tick = self.runtime._loop.time() + 0.05
@@ -510,7 +579,10 @@ class Session:
         p = self.p
         id = packet.packet_id
         if id == 42:
-            self.health(float(packet.health))
+            if not self.start_game:
+                self.defer_self_state(_InitialHealth(None, float(packet.health)))
+            else:
+                self.health(float(packet.health))
         elif id == 58:
             self.stats["column_packets"] += 1
             if self.runtime._wants(self.bot, ev.EventKind.chunk):
@@ -550,7 +622,11 @@ class Session:
                     ),
                 )
         elif id == 29:
-            if packet.runtime_id == self.status.actor_runtime_id:
+            if not self.start_game:
+                for attribute in packet.attribute_data:
+                    if attribute.name == "minecraft:health":
+                        self.defer_self_state(_InitialHealth(packet.runtime_id, attribute.current_value))
+            if self.start_game and packet.runtime_id == self.status.actor_runtime_id:
                 for attribute in packet.attribute_data:
                     if attribute.name == "minecraft:health":
                         self.health(attribute.current_value)
@@ -578,6 +654,14 @@ class Session:
                 self.actors[packet.runtime_id] = actor
                 self.emit(ev.EventKind.actor, lambda: ev.ActorEvent(ev.ActorEvent.Kind.metadata, actor))
         elif id == 19:
+            if not self.start_game:
+                mode = packet.reset_position
+                self.defer_self_state(_InitialPosition(
+                    packet.player_id, vec(packet.pos),
+                    mode == p.PlayerPositionModeComponent.PositionMode.TELEPORT,
+                    mode in (p.PlayerPositionModeComponent.PositionMode.TELEPORT,
+                             p.PlayerPositionModeComponent.PositionMode.RESPAWN),
+                ))
             if self.start_game and packet.player_id == self.status.actor_runtime_id:
                 mode = packet.reset_position
                 self.position(
@@ -657,6 +741,7 @@ class Session:
                 pitch, yaw, head = (getattr(move, field) * 360 / 256 for field in ("rot_x", "rot_y", "rot_y_head"))
             else:
                 position = actor.position
+                coordinates = {}
                 angles = [actor.pitch, actor.yaw, actor.head_yaw]
                 for i, field in enumerate(
                     ("new_position_x", "new_position_y", "new_position_z", "rot_x", "rot_y", "rot_y_head")
@@ -665,9 +750,11 @@ class Session:
                     present = value is not None if self.options.protocol == 2193 else bool(move.header & (1 << i))
                     if present:
                         if i < 3:
-                            position = replace(position, **{("x", "y", "z")[i]: value})
+                            coordinates[("x", "y", "z")[i]] = value
                         else:
                             angles[i - 3] = value * 360 / 256
+                if coordinates:
+                    position = replace(position, **coordinates)
                 pitch, yaw, head = angles
             self.move_actor(actor, position, pitch, yaw, head)
         elif id == 39:
@@ -698,17 +785,19 @@ class Session:
             inventory_id = int(packet.inventory_id)
             if id == 49:
                 inventory = InventorySnapshot(
-                    MappingProxyType({i: item.copy() for i, item in enumerate(packet.slots)}),
+                    {i: item.copy() for i, item in enumerate(packet.slots)},
                     True,
                     owned(packet.full_container_name),
                     owned(packet.storage_item),
                 )
             else:
-                previous = self.inventories.get(inventory_id, InventorySnapshot(MappingProxyType({})))
+                previous = self.inventories.get(inventory_id)
+                if previous is None:
+                    previous = InventorySnapshot({})
                 slots = dict(previous.slots)
                 slots[packet.slot] = packet.item.copy()
                 inventory = InventorySnapshot(
-                    MappingProxyType(slots),
+                    slots,
                     previous.complete,
                     owned(packet.full_container_name)
                     if packet.full_container_name is not None
@@ -734,10 +823,12 @@ class Session:
                 ):
                     continue
                 inventory_id = int(action.source.container_id)
-                previous = self.inventories.get(inventory_id, InventorySnapshot(MappingProxyType({})))
+                previous = self.inventories.get(inventory_id)
+                if previous is None:
+                    previous = InventorySnapshot({})
                 slots = dict(previous.slots)
                 slots[action.slot] = action.to_item_descriptor.copy()
-                self.inventories[inventory_id] = replace(previous, slots=MappingProxyType(slots))
+                self.inventories[inventory_id] = replace(previous, slots=slots)
                 self.note_item_update(inventory_id, action.slot)
                 if inventory_id not in changed:
                     changed.append(inventory_id)
@@ -774,8 +865,11 @@ class Session:
             actor = self.actors.get(packet.runtime_id)
             if actor:
                 self.actors[packet.runtime_id] = replace(actor, last_event=packet.copy())
-            if packet.runtime_id == self.status.actor_runtime_id and packet.event_id == p.ActorEvent.DEATH:
-                self.health(0)
+            if packet.event_id == p.ActorEvent.DEATH:
+                if not self.start_game:
+                    self.defer_self_state(_InitialHealth(packet.runtime_id, 0))
+                elif packet.runtime_id == self.status.actor_runtime_id:
+                    self.health(0)
             self.emit(ev.EventKind.actor_signal, lambda: ev.ActorSignalEvent(packet.copy()))
         elif id == 45:
             if packet.state == p.PlayerRespawnState.READY_TO_SPAWN and self.respawn_phase == 1:
@@ -798,7 +892,7 @@ class Session:
             self.dimension_deadline = self.runtime._loop.time() + 1
             self.invalidate_operation("dimension changed")
             self.emit(ev.EventKind.dimension, lambda: ev.DimensionEvent(packet.dimension_id, position))
-            if self.usable():
+            if self.usable() and self.options.load_screen:
                 self.enqueue(
                     p.ServerboundLoadingScreenPacket(
                         loading_screen_packet_type=p.ServerboundLoadingScreenPacketType.START_LOADING_SCREEN,
@@ -840,12 +934,13 @@ class Session:
         if self.dimension_deadline is not None and self.runtime._loop.time() >= self.dimension_deadline:
             self.dimension_deadline = None
             self.action(False)
-            self.enqueue(
-                self.p.ServerboundLoadingScreenPacket(
-                    loading_screen_packet_type=self.p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
-                    loading_screen_id=self.loading_screen_id,
+            if self.options.load_screen:
+                self.enqueue(
+                    self.p.ServerboundLoadingScreenPacket(
+                        loading_screen_packet_type=self.p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
+                        loading_screen_id=self.loading_screen_id,
+                    )
                 )
-            )
             self.handled_teleport = True
         frame = self.input or Input(position=self.status.position)
         self.input = None
@@ -897,11 +992,34 @@ class Session:
     def wire_vec(self, value):
         return self.p.Vec3(x=value.x, y=value.y, z=value.z)
 
+    def defer_self_state(self, effect):
+        if len(self.initial_self_state) >= 4096:
+            raise _MalformedPacket("pre-StartGame self-state limit exceeded")
+        self.initial_self_state.append(effect)
+
+    def apply_initial_self_state(self):
+        pending, self.initial_self_state = self.initial_self_state, []
+        try:
+            for effect in pending:
+                if not self.usable():
+                    return
+                if effect.runtime_id is not None and effect.runtime_id != self.status.actor_runtime_id:
+                    continue
+                if isinstance(effect, _InitialPosition):
+                    self.position(effect.position, effect.teleport, False, effect.acknowledge)
+                else:
+                    self.health(effect.value)
+        finally:
+            pending.clear()
+
     def set_input(self, frame):
         self.require_ready()
         if not finite(frame.position, frame.delta, frame.move, frame.pitch, frame.yaw):
             raise ValueError("input values must be finite")
-        self.input = replace(frame)
+        if type(frame) is Input:
+            self.input = Input(frame.position, frame.delta, frame.move, frame.pitch, frame.yaw, frame.vertical_collision)
+        else:
+            self.input = replace(frame)
 
     def set_look(self, pitch, yaw):
         if not finite(pitch, yaw):
@@ -923,9 +1041,15 @@ class Session:
     def health(self, value):
         if not finite(value):
             raise _MalformedPacket("non-finite health")
-        self.status = replace(self.status, health=value)
-        if value <= 0 and self.status.alive:
-            self.status = replace(self.status, alive=False, selected_hotbar=None)
+        died = value <= 0 and self.status.alive
+        respawned = value > 0 and not self.status.alive and self.respawn_phase == 2
+        if died:
+            self.status = replace(self.status, health=value, alive=False, selected_hotbar=None)
+        elif respawned:
+            self.status = replace(self.status, health=value, alive=True)
+        else:
+            self.status = replace(self.status, health=value)
+        if died:
             self.look = self.input = None
             self.input_epoch += 1
             self.equipment_epoch += 1
@@ -935,8 +1059,7 @@ class Session:
             self.stats["deaths"] += 1
             self.invalidate_operation("player died")
             self.emit(ev.EventKind.death, ev.DeathEvent)
-        elif value > 0 and not self.status.alive and self.respawn_phase == 2:
-            self.status = replace(self.status, alive=True)
+        elif respawned:
             self.respawn_phase = 0
             self.stats["respawns"] += 1
             self.emit(ev.EventKind.respawn, ev.RespawnEvent)
@@ -1037,7 +1160,7 @@ class Session:
                 if inventory is not None:
                     slots = dict(inventory.slots)
                     slots.pop(index, None)
-                    self.inventories[inventory_id] = replace(inventory, slots=MappingProxyType(slots), complete=False)
+                    self.inventories[inventory_id] = replace(inventory, slots=slots, complete=False)
         touched = []
         for change in self.item_changes:
             try:
@@ -1289,11 +1412,16 @@ class Session:
             )
         )
 
-    def respawn(self):
+    def respawn(self, *, retry: bool = False):
+        if type(retry) is not bool:
+            raise ValueError("retry must be a boolean")
         self.require_ready()
         if self.status.alive:
             raise RuntimeError("bot is alive")
-        if self.respawn_phase:
+        if self.respawn_phase and not retry:
+            return
+        if self.respawn_phase == 2:
+            self.action(True)
             return
         self.enqueue(
             self.p.RespawnPacket(

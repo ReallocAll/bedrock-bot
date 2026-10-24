@@ -2,9 +2,66 @@ import gc
 
 import bedrock_protocol as bp
 import pytest
-from trade_peer import deliver, open_trade, response_packet, scene, sent, stack
+from peer import actor_packet
+from trade_peer import (
+    deliver,
+    open_packet,
+    open_trade,
+    response_info,
+    response_packet,
+    scene,
+    sent,
+    stack,
+    trade_packet,
+)
 
 import bedrock_bot as api
+from bedrock_bot._projection import project
+
+
+@pytest.mark.parametrize("version", [1001, 2193])
+def test_versioned_projection_uses_native_provenance_and_types_without_module_metadata(monkeypatch, version):
+    p = getattr(bp, f"v{version}")
+    codec = bp.Codec(version)
+
+    def decode(packet):
+        return codec.decode_packet(codec.encode_packet(packet)).payload
+
+    cases = [
+        (
+            p.SynchedActorData.CopyableDataList(data=[]),
+            decode(actor_packet(p)).data,
+            bp.v1001.SynchedActorData.CopyableDataList,
+            bp.v2193.SynchedActorData.CopyableDataList,
+        ),
+        (open_packet(p), decode(open_packet(p)), bp.v1001.ContainerOpenPacket, bp.v2193.ContainerOpenPacket),
+        (trade_packet(p), decode(trade_packet(p)), bp.v1001.UpdateTradePacket, bp.v2193.UpdateTradePacket),
+        (
+            response_info(p),
+            decode(response_packet(p)).responses[0],
+            bp.v1001.ItemStackResponseInfo,
+            bp.v2193.ItemStackResponseInfo,
+        ),
+    ]
+    for constructed, decoded, type1001, type2193 in cases:
+        assert constructed.protocol is None and decoded.protocol == version
+        monkeypatch.setattr(type(constructed), "__module__", "unrelated_module")
+        expected = 1001 if type1001 is type2193 else version
+        assert project(constructed).protocol == expected
+        assert project(constructed).copy().to_dict()["protocol"] == expected
+        assert project(decoded).protocol == version
+        assert project(decoded).copy().to_dict()["protocol"] == version
+
+
+def test_shared_native_type_uses_decoded_provenance_and_constructed_1001_fallback(monkeypatch):
+    codec = bp.Codec(2193)
+    constructed = open_packet(bp.v2193)
+    decoded = codec.decode_packet(codec.encode_packet(constructed)).payload
+    monkeypatch.setattr(bp.v1001, "ContainerOpenPacket", bp.v2193.ContainerOpenPacket)
+    assert constructed.protocol is None
+    assert api.ContainerSnapshot(open=constructed).open.protocol == 1001
+    projected = api.ContainerSnapshot(open=decoded).open
+    assert projected.protocol == 2193 and projected.copy().to_dict()["protocol"] == 2193
 
 
 @pytest.mark.parametrize("version", [1001, 2193])
@@ -102,8 +159,6 @@ def test_item_net_id_alternatives(alternative):
 
 @pytest.mark.parametrize("version", [1001, 2193])
 async def test_all_metadata_kinds_native_ownership_and_typed_nbt(monkeypatch, version):
-    from peer import actor_packet
-
     async with scene(monkeypatch, version) as (bot, peer, events):
         p = peer.p
         mutable = bytearray(b"\0\x7f\x80\xff")

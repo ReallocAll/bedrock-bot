@@ -8,7 +8,7 @@ from trade_peer import inventory_packet, registry_packet, response_info, stack
 import bedrock_bot as api
 
 
-def test_all_eighteen_event_materialization_contracts():
+def test_all_event_materialization_contracts():
     p = bp.v2193
     token = api.BotToken()
     window = api.WindowRef(token, 1, 1, 5, 15, -92)
@@ -17,7 +17,7 @@ def test_all_eighteen_event_materialization_contracts():
     inventory = api.InventorySnapshot({0: empty_item(p)})
     signal = p.ActorEventPacket(runtime_id=91, event_id=p.ActorEvent(1), data=7, fire_at_position=None)
     examples = [
-        (api.StateEvent(api.BotState.ready), {"state", "reason"}),
+        (api.StateEvent(api.BotState.ready), {"state", "reason", "disconnect"}),
         (api.TickEvent(3, 0), {"tick", "lateness_us"}),
         (api.PositionEvent(api.Vec3(1, 2, 3)), {"position", "teleport", "correction"}),
         (
@@ -44,8 +44,9 @@ def test_all_eighteen_event_materialization_contracts():
             {"session_id", "runtime_id", "unique_id", "position", "velocity", "pitch", "yaw", "head_yaw", "body_yaw"},
         ),
         (api.InventorySlotEvent(1, 0, 0, empty_item(p)), {"session_id", "inventory_id", "slot", "item"}),
+        (api.DecodeErrorEvent(42, "invalid packet", False), {"packet_id", "reason", "recoverable"}),
     ]
-    assert len(examples) == int(api.EventKind.count) == 18
+    assert len(examples) == int(api.EventKind.count) - 1 == 19
     for event, keys in examples:
         assert set(event.to_dict()) == keys
         cloned = event.copy()
@@ -99,4 +100,5 @@ async def test_complete_captures_maps_and_direct_admissions(monkeypatch, version
         with pytest.raises(TypeError):
             snapshot.inventories[0].slots[9] = None
         await bot.disconnect()
+        assert set(snapshot.inventories) == {0} and snapshot.inventories[0].slots[9].stack_size == 10
     assert retained.inventories[0].slots[9].stack_size == 10

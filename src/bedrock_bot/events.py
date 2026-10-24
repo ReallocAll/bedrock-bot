@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import TypeAlias
 
+from bedrock_protocol import DecodedPacket
+
 from ._projection import ActorSignal, ItemStackResponse, ReadonlySequence, Record, materialize
 from .observations import (
     ActorSnapshot,
@@ -11,7 +13,7 @@ from .observations import (
     RegistryItems,
 )
 from .operations import ItemRequestOutcome
-from .types import BotState, BotToken, ItemRequestKey, Vec3, WindowRef
+from .types import BotState, BotToken, ItemRequestKey, ServerDisconnectReason, Vec3, WindowRef
 
 
 class EventKind(IntEnum):
@@ -33,11 +35,13 @@ class EventKind(IntEnum):
     item_request = 15
     actor_motion = 16
     inventory_slot = 17
-    count = 18
+    decode_error = 18
+    packet_decoded = 19
+    count = 20
 
 
 def event_mask(kind: EventKind) -> int:
-    return 1 << int(kind) if 0 <= int(kind) < 18 else 0
+    return 1 << int(kind) if 0 <= int(kind) < int(EventKind.count) else 0
 
 
 LEGACY_EVENTS = (1 << 16) - 1
@@ -49,7 +53,7 @@ DEFAULT_EVENTS = (
     | event_mask(EventKind.respawn)
     | event_mask(EventKind.dimension)
 )
-ALL_EVENTS = (1 << 18) - 1
+ALL_EVENTS = (1 << int(EventKind.count)) - 1
 
 
 def validate_mask(mask: int) -> int:
@@ -62,6 +66,21 @@ def validate_mask(mask: int) -> int:
 class StateEvent(Record):
     state: BotState
     reason: str = ""
+    disconnect: ServerDisconnectReason | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DecodeErrorEvent(Record):
+    packet_id: int
+    reason: str
+    recoverable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PacketDecodedEvent:
+    """Raw notification retaining an immutable, owned native decoded packet."""
+
+    packet: DecodedPacket
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,4 +260,6 @@ Event: TypeAlias = (
     | ItemRequestEvent
     | ActorMotionEvent
     | InventorySlotEvent
+    | DecodeErrorEvent
+    | PacketDecodedEvent
 )

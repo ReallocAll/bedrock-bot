@@ -32,6 +32,9 @@ class Runtime:
             raise RuntimeError(
                 "Windows requires SelectorEventLoop; use asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)"
             )
+        # Complete required protocol and transport imports before entering Runtime.
+        from . import session  # noqa: F401
+
         self._loop = loop
         self._stop_event = asyncio.Event()
         self._lifetime = self._loop.create_task(self._run(), name="bedrock-runtime")

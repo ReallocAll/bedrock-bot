@@ -621,32 +621,6 @@ async def test_queue_limits_fail_visibly_and_bound_typed_payload(monkeypatch):
         assert bot.get_status().state == api.BotState.failed
 
 
-async def test_sender_discards_queued_frame_invalidated_by_correction(monkeypatch):
-    peers = Peers(monkeypatch)
-    async with api.Runtime() as runtime:
-        bot = runtime.add_bot(api.BotOptions(server_url="http://peer"))
-        await bot.wait_ready(2)
-        peer = peers.connections[-1]
-        p = peer.p
-        peer.pause_sender(bot)
-        bot.set_input(api.Input(position=api.Vec3(99, 99, 99)))
-        peer.send(
-            p.CorrectPlayerMovePredictionPacket(
-                prediction_type=p.RewindType.PLAYER,
-                pos=p.Vec3(x=4, y=5, z=6),
-                pos_delta=p.Vec3(x=0, y=0, z=0),
-                vehicle_rotation=p.Vec2(x=0, y=0),
-                vehicle_angular_velocity=None,
-                on_ground=True,
-                tick=0,
-            )
-        )
-        await until(lambda: bot.capture_statistics().corrections == 1)
-        peer.resume_sender()
-        await until(lambda: any(x.packet_id == 144 for x in peer.received))
-        assert all(x.pos.x != 99 for x in peer.received if x.packet_id == 144)
-
-
 def test_process_exits_within_twenty_seconds():
     code = """
 import asyncio

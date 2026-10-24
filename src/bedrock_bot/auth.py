@@ -19,14 +19,15 @@ class Identity:
     name: str
     uuid: str
     key: ec.EllipticCurvePrivateKey = field(repr=False)
+    xuid: str = ""
     token: str = field(init=False, repr=False)
 
     def __post_init__(self):
         self.token = _identity_token(self)
 
 
-def create_identity(name: str, uuid: str) -> Identity:
-    return Identity(name, uuid, ec.generate_private_key(ec.SECP384R1()))
+def create_identity(name: str, uuid: str, *, xuid: str = "") -> Identity:
+    return Identity(name, uuid, ec.generate_private_key(ec.SECP384R1()), xuid=xuid)
 
 
 def _base(data: bytes, url: bool = False) -> str:
@@ -99,7 +100,7 @@ def _identity_token(identity: Identity) -> str:
         mid="",
         tid="",
         cpk=header["x5u"],
-        xid="",
+        xid=identity.xuid,
         xname=identity.name,
         leguuid=identity.uuid,
     )

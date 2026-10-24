@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import fields, replace
-from types import MappingProxyType
 
 from ._projection import ReadonlyMap
 from .events import validate_mask
@@ -189,8 +188,12 @@ class Bot:
             return Statistics()
         return Statistics(
             **session.stats,
+            batch_bytes_in=0 if session.connection is None else session.connection.batch_bytes_in,
+            batch_bytes_out=0 if session.connection is None else session.connection.batch_bytes_out,
             packet_counts_in=session.packet_counts_in,
             packet_counts_out=session.packet_counts_out,
+            play_packet_counts_in=session.play_packet_counts_in,
+            play_packet_counts_out=session.play_packet_counts_out,
         )
 
     def capture_snapshot(self):
@@ -198,7 +201,7 @@ class Bot:
         return Snapshot(
             **{f.name: getattr(s.status, f.name) for f in fields(s.status)},
             actors=self.capture_actors(),
-            inventories=MappingProxyType(dict(s.inventories)),
+            inventories=s.inventories,
             item_registry=s.registry,
             container=s.container,
         )
@@ -302,8 +305,8 @@ class Bot:
         heights = bounded_ints(heights, -128, 127, 1398101)
         self._current(mutable=True).request_sub_chunks(dimension, chunk_x, chunk_z, heights)
 
-    def respawn(self):
-        self._current(mutable=True).respawn()
+    def respawn(self, *, retry: bool = False):
+        self._current(mutable=True).respawn(retry=retry)
 
     def probe_latency(self):
         self._current(mutable=True).probe_latency()

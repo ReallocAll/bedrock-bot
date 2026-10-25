@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -7,6 +8,7 @@ import struct
 import time
 from dataclasses import dataclass, field
 from importlib.resources import files
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from cryptography.exceptions import InvalidSignature
@@ -137,7 +139,7 @@ def build_login(identity: Identity, options) -> bytes:
         PlatformOnlineId="",
         PremiumSkin=False,
         SelfSignedId=identity.uuid,
-        ServerAddress=options.server_url,
+        ServerAddress=(urlsplit(options.server_url).netloc if options.transport == "raknet" else options.server_url),
         SkinAnimationData="",
         SkinData=_base(b"\0\0\0\xff" * (64 * 32)),
         SkinGeometryData=_base(files("bedrock_bot").joinpath("resources/skin_geometry.json").read_bytes()),
@@ -172,10 +174,14 @@ def build_login(identity: Identity, options) -> bytes:
     return struct.pack("<I", len(envelope)) + envelope + struct.pack("<I", len(token)) + token
 
 
-def derive_session_key(identity: Identity, jwt: str) -> bytes:
+def derive_session_key(identity: Identity, jwt: str, *, server_key_sha256: str = "") -> bytes:
     try:
         if not isinstance(jwt, str) or len(jwt) > 65536:
             raise ValueError("server handshake JWT exceeds 64 KiB")
+        if not isinstance(server_key_sha256, str) or (
+            server_key_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", server_key_sha256)
+        ):
+            raise ValueError("invalid server key pin")
         parts = jwt.split(".")
         if len(parts) != 3 or not all(parts):
             raise ValueError("invalid server handshake JWT structure")
@@ -188,6 +194,8 @@ def derive_session_key(identity: Identity, jwt: str) -> bytes:
             raise ValueError("server handshake key must be a P-384 SPKI")
         if server.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo) != spki:
             raise ValueError("invalid server handshake SPKI")
+        if server_key_sha256 and not hmac.compare_digest(hashlib.sha256(spki).hexdigest(), server_key_sha256.lower()):
+            raise ValueError("server handshake key pin mismatch")
         signature = _decode(parts[2], 96, True)
         if len(signature) != 96:
             raise ValueError("invalid server handshake signature length")

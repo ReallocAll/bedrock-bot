@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from nethernet import Connection
 
     from .auth import Identity
+    from .raknet_transport import RakNetTransport
     from .types import BotOptions
 
 MAX_WIRE_MESSAGE = 2 * 16 * 1024 * 1024 + 1024
@@ -18,7 +19,20 @@ COMMAND_BYTES = 4 * 1024 * 1024
 COMMAND_PACKETS = 4096
 
 
-async def _open_connection(options: "BotOptions", identity: "Identity") -> "Connection":
+async def _open_connection(options: "BotOptions", identity: "Identity") -> "Connection | RakNetTransport":
+    selected_transport = getattr(options, "transport", "nethernet")
+    if selected_transport == "raknet":
+        try:
+            from .raknet_transport import open_connection
+        except ModuleNotFoundError as error:
+            if error.name == "raknet":
+                raise RuntimeError(
+                    "RakNet transport requires the optional dependency; install bedrock-bot[raknet]"
+                ) from error
+            raise
+        return await open_connection(options)
+    if selected_transport != "nethernet":
+        raise ValueError("transport must be 'nethernet' or 'raknet'")
     if not options.server_key_sha256:
         raise ValueError("a server identity key pin is required")
 

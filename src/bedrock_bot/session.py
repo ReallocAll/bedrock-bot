@@ -444,6 +444,12 @@ class Session:
                 if decoded.header.sender_subclient_id or decoded.header.target_subclient_id:
                     continue
                 try:
+                    if (
+                        self.options.transport == "raknet"
+                        and decoded.header.packet_id == 3
+                        and packet_index != len(headers) - 1
+                    ):
+                        raise _MalformedPacket("server handshake must be the final packet in a RakNet batch")
                     await self.handle(decoded.payload)
                 except _MalformedPacket as error:
                     self.decode_error(decoded.header.packet_id, str(error), recoverable=False)
@@ -456,6 +462,9 @@ class Session:
     async def handle(self, packet):
         p = self.p
         id = packet.packet_id
+        pinned_raknet = self.options.transport == "raknet" and bool(self.options.server_key_sha256)
+        if pinned_raknet and not self.login and id not in (143, 3, 2, 5):
+            raise _MalformedPacket("gameplay packet received before pinned login success")
         if id == 143:
             if self.settings or self.status.state != BotState.negotiating:
                 raise RuntimeError("unexpected NetworkSettings")
@@ -473,23 +482,34 @@ class Session:
             if not self.settings or self.handshake or self.login:
                 raise RuntimeError("unexpected server handshake")
             try:
-                # DTLS protects the stream; verify the game handshake without
-                # enabling BatchCodec game-layer encryption.
-                derive_session_key(self.identity, packet.token)
+                if self.options.transport == "raknet":
+                    key = derive_session_key(
+                        self.identity, packet.token, server_key_sha256=self.options.server_key_sha256
+                    )
+                else:
+                    # NetherNet protects the stream; retain its existing transport-level identity pin.
+                    derive_session_key(self.identity, packet.token)
             except ValueError:
                 raise _MalformedPacket("invalid server handshake") from None
-            await self.flush()
+            if self.options.transport == "raknet":
+                await self.flush(lambda: self.batch.enable_encryption(key))
+            else:
+                await self.flush()
             self.handshake = True
             self.enqueue(p.ClientToServerHandshakePacket())
         elif id == 2:
             if packet.status == p.PlayStatus.LOGIN_SUCCESS:
                 if not self.settings:
                     raise RuntimeError("LoginSuccess before settings")
+                if self.options.transport == "raknet" and self.options.server_key_sha256 and not self.handshake:
+                    raise RuntimeError("LoginSuccess before pinned server handshake")
                 if not self.login:
                     self.login = True
                     self.enqueue(p.ClientCacheStatusPacket(enabled=self.options.client_cache))
                     self.state(BotState.spawning)
             elif packet.status == p.PlayStatus.PLAYER_SPAWN:
+                if pinned_raknet and not self.login:
+                    raise _MalformedPacket("PlayerSpawn before pinned LoginSuccess")
                 self.spawn = True
                 await self.try_ready()
             else:
@@ -552,6 +572,11 @@ class Session:
         if (
             not self.usable()
             or self.initialized
+            or (
+                self.options.transport == "raknet"
+                and self.options.server_key_sha256
+                and (not self.login or not self.handshake)
+            )
             or not self.start_game
             or not self.spawn
             or self.status.chunk_radius <= 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -52,8 +53,11 @@ class BotOptions:
     validate_all_packets: bool = False
     recover_packet_errors: bool = False
     xuid: str = ""
+    transport: Literal["nethernet", "raknet"] = "nethernet"
 
     def _validate(self) -> None:
+        if self.transport not in ("nethernet", "raknet"):
+            raise ValueError("transport must be 'nethernet' or 'raknet'")
         for name in ("load_screen", "validate_all_packets", "recover_packet_errors"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -66,9 +70,34 @@ class BotOptions:
         ):
             raise ValueError("server_key_sha256 must be empty or 64 hexadecimal characters")
         self.server_key_sha256 = self.server_key_sha256.lower()
-        parsed = urlsplit(self.server_url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
-            raise ValueError("server_url must be an explicit HTTP signaling URL without credentials")
+        if self.transport == "raknet":
+            try:
+                parsed = urlsplit(self.server_url)
+                port = parsed.port
+            except ValueError:
+                raise ValueError("server_url must be an explicit raknet://host:port URL") from None
+            if (
+                parsed.scheme != "raknet"
+                or not parsed.hostname
+                or port is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or "@" in parsed.netloc
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+                or "?" in self.server_url
+                or "#" in self.server_url
+            ):
+                raise ValueError("server_url must be an explicit raknet://host:port URL without credentials or extras")
+            if not 1 <= port <= 65535:
+                raise ValueError("RakNet server port must be in 1..65535")
+            if self.protocol != 2193:
+                raise ValueError("RakNet transport requires protocol 2193")
+        else:
+            parsed = urlsplit(self.server_url)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("server_url must be an explicit HTTP signaling URL without credentials")
         if not self.name:
             raise ValueError("name must not be empty")
         if self.protocol not in (1001, 2193):

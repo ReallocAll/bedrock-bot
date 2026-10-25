@@ -1,8 +1,9 @@
 # bedrock-bot
 
 An asyncio client for Minecraft Bedrock automation. It manages connections,
-movement, world observations, inventories and trading over NetherNet. Gameplay
-support covers protocols **1001** and **2193**.
+movement, world observations, inventories and trading over NetherNet by default,
+with an opt-in RakNet transport. Gameplay support covers protocols **1001** and
+**2193**; RakNet supports **2193** only.
 
 ## Quick start
 
@@ -42,10 +43,11 @@ asyncio.run(
 python connect.py http://server.example:19672 "VERIFIED_64_HEX_DIGIT_SHA256"
 ```
 
-The digest is required: the client verifies the signed server identity, SDP
-fingerprint and configured key. NetherNet provides DTLS encryption. RakNet and
-Xbox account authentication are not supported; an offline XUID is only a declared
-identity field.
+The digest is required for the default NetherNet transport: the client verifies
+the signed server identity, SDP fingerprint and configured key. NetherNet
+provides DTLS encryption. RakNet setup and its optional game-handshake key pin
+are described below. Xbox account authentication is not provided; an offline
+XUID is only a declared identity field.
 
 ## Installation
 
@@ -54,6 +56,10 @@ specified in [pyproject.toml](pyproject.toml). Use native wheels compatible with
 your Python interpreter and platform. See the protocol project's
 [Python guide](https://github.com/EndstoneMC/bedrock-protocol/blob/main/docs/python.md)
 for its compiler and native runtime packages.
+
+To use RakNet, install its optional transport dependency with
+`python -m pip install "bedrock-bot[raknet]"` (use `.[raknet]` when installing
+from a checkout).
 
 From this checkout or an extracted SDK source distribution, install into a virtual
 environment. Point `--find-links` at the matching compiler and native wheels:
@@ -64,6 +70,25 @@ python -m pip install --find-links ../bedrock-protocol/dist .
 
 Replace that wheel-directory path for your layout. Other dependencies are resolved
 from their declared sources; the NetherNet Git dependency requires network access.
+
+## RakNet
+
+NetherNet remains the default transport and requires `server_key_sha256` to pin
+the server identity. For RakNet, set `transport="raknet"` and pass an explicit
+`raknet://host:port` endpoint in `server_url`; the URI cannot contain user
+information, a path, a query or a fragment. RakNet supports protocol 2193 only.
+See the runnable [RakNet connection example](examples/raknet_connect.py).
+
+On RakNet, `server_key_sha256` is an optional SHA-256 pin of the DER-encoded
+SubjectPublicKeyInfo for the server's game-handshake key. When supplied, the
+server must perform that handshake before login succeeds, and its key is checked
+against the pin. Without a pin, the handshake's self-signature is still checked,
+but the server identity is unauthenticated and a man-in-the-middle attack is
+possible. When a server sends the signed game handshake, RakNet enables native
+game encryption and uses the native batch codec over reliable ordered FE framing;
+it does not use DTLS. Without a pin, a server may omit the handshake and still
+report login success. This transport does not add Xbox account authentication or
+shared-peer support.
 
 ## Using the API
 
@@ -78,14 +103,15 @@ from their declared sources; the NetherNet Git dependency requires network acces
   observed items and current references. A timed-out or cancelled waiter does not
   cancel a submitted transaction; never retry an indeterminate result.
 - **Transport statistics:** application packet and batch counters are available;
-  NetherNet connected-byte counters are unknown (`None`). Application limits do
-  not bound transport backlog or reassembly memory.
+  connected-byte counters are unknown (`None`) on both transports. Application
+  limits do not bound transport backlog or reassembly memory.
 
 The [API guide](docs/api.md) covers observations, operations, events,
-statistics and error handling. The runnable examples demonstrate an
+statistics and error handling. The runnable examples demonstrate a
+[RakNet connection](examples/raknet_connect.py), an
 [observed trade](examples/first_trade.py) and a
-[trade/restock cycle](examples/villager_cycle.py); both require a prepared server
-and explicit target identifiers.
+[trade/restock cycle](examples/villager_cycle.py). The trade examples require a
+prepared server and explicit target identifiers.
 
 ## Contributing
 
@@ -104,11 +130,11 @@ and access to the compatible protocol wheels. The filenames below follow the
 current package version; use the filenames produced by your build:
 
 ```shell
-python -m pip install --find-links ../bedrock-protocol/dist "dist/bedrock_bot-0.1.0-py3-none-any.whl[test]"
+python -m pip install --find-links ../bedrock-protocol/dist "dist/bedrock_bot-0.1.0-py3-none-any.whl[test,raknet]"
 mkdir ../bedrock-bot-test-source
 tar -xf dist/bedrock_bot-0.1.0.tar.gz -C ../bedrock-bot-test-source
 cd ../bedrock-bot-test-source/bedrock_bot-0.1.0
-python -I -m pytest tests/python tests/integration/nethernet/test_transport.py
+python -I -m pytest tests/python tests/integration/nethernet/test_transport.py tests/integration/raknet
 ```
 
 Choose a new extraction directory outside the checkout. Run pytest with the

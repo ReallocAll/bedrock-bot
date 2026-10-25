@@ -119,14 +119,14 @@ journal is retained.
 
 Captures retain their values; reconnect starts new application counters.
 `connected_bytes_sent` and `connected_bytes_received` are always `None` with
-NetherNet, which exposes no DTLS byte counters.
+both transports, which do not expose connected-byte counters.
 
 | Counter | Boundary |
 | --- | --- |
-| `batch_bytes_in` | Received batch bytes before decoding, including malformed batches. |
+| `batch_bytes_in` | Received native batch payload bytes before decoding, including malformed batches. RakNet's FE marker and transport framing are excluded. |
 | `packets_in`, `packet_counts_in` | Every validated header in a successfully returned batch, including unknown, unselected and subclient-filtered packets. The histogram has 1024 entries. |
 | `play_packet_counts_in` | Successfully decoded packets after spawn completion, including later packets in the batch that completes spawn. Unselected packets and recovered body errors do not count; decoded subclient packets do. |
-| `batch_bytes_out`, `packets_out`, `packet_counts_out` | Advance only after awaited `Connection.send()` returns successfully, independently of an operation's submitted phase. |
+| `batch_bytes_out`, `packets_out`, `packet_counts_out` | Advance only after awaited `Connection.send()` returns successfully, independently of an operation's submitted phase. RakNet's FE marker and transport framing are excluded from batch bytes. |
 | `play_packet_counts_out` | Successful sends after spawn completion. Excludes login and `SetLocalPlayerAsInitialized`; includes the later radius override and loading-screen messages. |
 
 A fatal native batch decode counts input bytes and a decode error, but **no packet
@@ -137,28 +137,49 @@ failure does not undo already counted headers. Both play histograms are immutabl
 
 ## Transport and limits
 
-The SDK uses NetherNet HTTP signaling, DTLS encryption and a verified game
-handshake, without a second game-layer encryption stream. The configured server
-key digest, identity JWT signature and SDP fingerprint are verified on connection.
-`BotOptions.xuid` declares an offline identity field, not an authenticated Xbox
-identity. It defaults to empty; a supplied value is at most 20 ASCII decimal
-digits fitting an unsigned 64-bit integer, with its decimal spelling preserved.
+NetherNet is the default transport. It uses HTTP signaling and DTLS encryption,
+and verifies the signed server identity, SDP fingerprint and required configured
+server key digest. It supports protocols 1001 and 2193 without a second
+game-layer encryption stream.
+
+RakNet is opt-in with `BotOptions(transport="raknet")`, the optional `raknet`
+extra and a `server_url` of the form `raknet://host:port`. The URI cannot contain
+user information, a path, a query or a fragment. RakNet supports protocol 2193
+only. When the server sends a signed game handshake, RakNet enables native game
+encryption and uses the native batch codec over reliable ordered FE framing; it
+does not use DTLS. Without a pin, the server may omit the handshake and still
+report login success.
+
+For RakNet, `server_key_sha256` optionally pins the SHA-256 digest of the DER
+SubjectPublicKeyInfo for the server's game-handshake key. When a pin is set, the
+server must complete that handshake before login succeeds, and the key must
+match. Without a pin, any handshake's self-signature is checked, but server
+identity is unauthenticated and a man-in-the-middle attack is possible. Neither
+transport provides Xbox account authentication: `BotOptions.xuid` declares an
+offline identity field. It defaults to empty; a supplied value is at most 20
+ASCII decimal digits fitting an unsigned 64-bit integer, with its decimal
+spelling preserved.
 
 The application send queue accepts at most 4096 packets and 4 MiB of estimated
 encoded data, including a batch being submitted. Commands are revalidated before
 batch encoding. Complete wire messages are limited to 32 MiB plus 1 KiB each way;
-the receive check runs after transport reassembly. These limits do not bound
-transport backlog or reassembly memory. `Connection.send()` provides no capacity
-wait or atomic fragment reservation.
+the receive check runs after transport reassembly. Batch byte statistics count
+the native batch payload and exclude RakNet's FE marker and other transport
+framing. These limits do not bound transport backlog or reassembly memory.
+`Connection.send()` provides no capacity wait or atomic fragment reservation.
 
 Runtime exit joins bot-owned reader, sender, ticker and connection-attempt work,
 settles queued boundaries and operations, and awaits connection close. Cancelling
-a close waiter does not cancel this cleanup.
+a close waiter does not cancel this cleanup. With RakNet, cancellation during
+native connection acquisition waits for the acquisition to settle and closes
+any late connection; name resolution and native cleanup can extend beyond the
+configured connection timeout.
 
 ## Examples
 
-[First trade](../examples/first_trade.py) demonstrates observed inventory, a
-single exchange and returning residual input. [Villager cycle](../examples/villager_cycle.py)
+[RakNet connection](../examples/raknet_connect.py) waits for readiness and prints
+the player's position. [First trade](../examples/first_trade.py) demonstrates
+observed inventory, a single exchange and returning residual input. [Villager cycle](../examples/villager_cycle.py)
 adds exhaustion, natural restock, another trade, an attack and reconnect. They
 preserve unrelated inventory and reject stale references or uncertain outcomes.
 

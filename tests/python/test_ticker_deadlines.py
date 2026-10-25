@@ -42,6 +42,7 @@ def ticker_session(monkeypatch, clock, *, count, work=0, protocol=2193):
                           _options=api.BotOptions(server_url="http://unused", protocol=protocol))
     session = session_module.Session(bot, 1, asyncio.get_running_loop().create_future())
     session.status = dataclasses.replace(session.status, state=api.BotState.ready)
+    session.login = True
     session.next_tick = clock.time() + 0.05
     session.enqueue = lambda packet, **_kwargs: packets.append(packet)
     original_tick = session.tick

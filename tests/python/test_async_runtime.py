@@ -6,6 +6,7 @@ import threading
 
 import pytest
 from peer import Peers, actor_packet, motion_packet, slot_packet, submit, trade_packet, until
+from test_benchmark_hooks import dimension_ack
 
 import bedrock_bot as api
 
@@ -433,6 +434,8 @@ async def test_window_identity_death_respawn_dimension_and_correction(monkeypatc
             p.ChangeDimensionPacket(dimension_id=1, pos=p.Vec3(x=7, y=8, z=9), respawn=False, loading_screen_id=42)
         )
         await until(lambda: bot.get_status().dimension == 1)
+        peer.send(dimension_ack(p, bot.get_status().actor_runtime_id))
+        await until(lambda: bot._session.dimension_deadline is None)
         assert bot.get_observed_entities() == [] and bot.get_status().selected_hotbar is None
         assert bot._session.look is None
 

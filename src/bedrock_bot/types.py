@@ -92,8 +92,6 @@ class BotOptions:
                 raise ValueError("server_url must be an explicit raknet://host:port URL without credentials or extras")
             if not 1 <= port <= 65535:
                 raise ValueError("RakNet server port must be in 1..65535")
-            if self.protocol != 2193:
-                raise ValueError("RakNet transport requires protocol 2193")
         else:
             parsed = urlsplit(self.server_url)
             if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:

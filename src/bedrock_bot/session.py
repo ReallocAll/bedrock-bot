@@ -49,6 +49,7 @@ REQUIRED_IDS = frozenset(
         27,
         29,
         30,
+        36,
         39,
         42,
         45,
@@ -507,6 +508,7 @@ class Session:
                     self.login = True
                     self.enqueue(p.ClientCacheStatusPacket(enabled=self.options.client_cache))
                     self.state(BotState.spawning)
+                    await self.try_ready()
             elif packet.status == p.PlayStatus.PLAYER_SPAWN:
                 if pinned_raknet and not self.login:
                     raise _MalformedPacket("PlayerSpawn before pinned LoginSuccess")
@@ -572,17 +574,20 @@ class Session:
         if (
             not self.usable()
             or self.initialized
-            or (
-                self.options.transport == "raknet"
-                and self.options.server_key_sha256
-                and (not self.login or not self.handshake)
-            )
+            or not self.login
+            or (self.options.transport == "raknet" and self.options.server_key_sha256 and not self.handshake)
             or not self.start_game
             or not self.spawn
             or self.status.chunk_radius <= 0
         ):
             return
         p = self.p
+        if self.options.load_screen:
+            for mode in (
+                p.ServerboundLoadingScreenPacketType.START_LOADING_SCREEN,
+                p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
+            ):
+                self.enqueue(p.ServerboundLoadingScreenPacket(loading_screen_packet_type=mode, loading_screen_id=None))
         self.enqueue(p.SetLocalPlayerAsInitializedPacket(player_id=self.status.actor_runtime_id))
         await self.flush()
         if not self.usable():
@@ -594,12 +599,6 @@ class Session:
                     chunk_radius=self.options.chunk_radius, max_chunk_radius=self.options.chunk_radius
                 )
             )
-        if self.options.load_screen:
-            for mode in (
-                p.ServerboundLoadingScreenPacketType.START_LOADING_SCREEN,
-                p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
-            ):
-                self.enqueue(p.ServerboundLoadingScreenPacket(loading_screen_packet_type=mode, loading_screen_id=None))
         await self.flush()
         if self.usable():
             self.next_tick = self.runtime._loop.time() + 0.05
@@ -921,7 +920,7 @@ class Session:
             self.unique_ids.clear()
             self.status = replace(self.status, position=position, dimension=packet.dimension_id, selected_hotbar=None)
             self.loading_screen_id = packet.loading_screen_id
-            self.dimension_deadline = self.runtime._loop.time() + 1
+            self.dimension_deadline = self.runtime._loop.time() + self.options.spawn_timeout_ms / 1000
             self.invalidate_operation("dimension changed")
             self.emit(ev.EventKind.dimension, lambda: ev.DimensionEvent(packet.dimension_id, position))
             if self.usable() and self.options.load_screen:
@@ -931,6 +930,22 @@ class Session:
                         loading_screen_id=packet.loading_screen_id,
                     )
                 )
+        elif id == 36:
+            if (
+                self.dimension_deadline is not None
+                and packet.action == p.PlayerActionType.CHANGE_DIMENSION_ACK
+                and packet.runtime_id == self.status.actor_runtime_id
+            ):
+                self.dimension_deadline = None
+                if self.options.load_screen:
+                    self.enqueue(
+                        p.ServerboundLoadingScreenPacket(
+                            loading_screen_packet_type=p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
+                            loading_screen_id=self.loading_screen_id,
+                        )
+                    )
+                self.action(False)
+                self.handled_teleport = True
         elif id == 115:
             if packet.from_server:
                 self.enqueue(p.NetworkStackLatencyPacket(create_time=packet.create_time, from_server=False))
@@ -953,6 +968,8 @@ class Session:
                 if now >= self.spawn_deadline:
                     raise TimeoutError("login/spawn deadline expired")
                 continue
+            if self.dimension_deadline is not None and now >= self.dimension_deadline:
+                raise TimeoutError("dimension change confirmation deadline expired")
             if self.next_tick is not None and now >= self.next_tick:
                 lateness = now - self.next_tick
                 self.next_tick += (math.floor(lateness / 0.05) + 1) * 0.05
@@ -963,17 +980,8 @@ class Session:
                     self.tick()
 
     def tick(self):
-        if self.dimension_deadline is not None and self.runtime._loop.time() >= self.dimension_deadline:
-            self.dimension_deadline = None
-            self.action(False)
-            if self.options.load_screen:
-                self.enqueue(
-                    self.p.ServerboundLoadingScreenPacket(
-                        loading_screen_packet_type=self.p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
-                        loading_screen_id=self.loading_screen_id,
-                    )
-                )
-            self.handled_teleport = True
+        if self.dimension_deadline is not None:
+            return
         frame = self.input or Input(position=self.status.position)
         self.input = None
         if self.look is not None:

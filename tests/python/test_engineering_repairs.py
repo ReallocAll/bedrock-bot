@@ -6,6 +6,7 @@ from uuid import UUID
 import bedrock_protocol as bp
 import pytest
 from peer import Peers, actor_packet, empty_item, slot_packet, until
+from test_benchmark_hooks import dimension_ack
 from test_respawn_retry import ready_bot
 from trade_peer import deliver, inventory_packet, scene
 
@@ -159,7 +160,8 @@ async def test_prepared_input_epoch_is_invalidated_before_transmission(monkeypat
             )
             await until(lambda: bot.get_status().alive)
         elif invalidation == "dimension":
-            bot._session.dimension_deadline = bot._runtime._loop.time()
+            peer.send(dimension_ack(p, bot.get_status().actor_runtime_id))
+            await until(lambda: bot._session.dimension_deadline is None)
             bot._session.tick()
         bot.set_input(api.Input(position=api.Vec3(7, 8, 9)))
         bot._session.tick()
@@ -311,7 +313,8 @@ async def test_stale_equipment_is_not_revived_by_new_selection(monkeypatch, vers
                 peer,
                 p.ChangeDimensionPacket(dimension_id=1, pos=p.Vec3(x=7, y=8, z=9), respawn=False, loading_screen_id=42),
             )
-            bot._session.dimension_deadline = bot._runtime._loop.time()
+            peer.send(dimension_ack(p, bot.get_status().actor_runtime_id))
+            await until(lambda: bot._session.dimension_deadline is None)
             bot._session.tick()
         await deliver(bot, peer, inventory_packet(p, {}))
         bot.select_hotbar(2)

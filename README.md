@@ -3,7 +3,7 @@
 An asyncio client for Minecraft Bedrock automation. It manages connections,
 movement, world observations, inventories and trading over NetherNet by default,
 with an opt-in RakNet transport. Gameplay support covers protocols **1001** and
-**2193**; RakNet supports **2193** only.
+**2193** over NetherNet and RakNet.
 
 ## Quick start
 
@@ -77,7 +77,7 @@ NetherNet remains the default transport; its optional `server_key_sha256` pin
 checks the expected server identity key. For RakNet, set `transport="raknet"`
 and pass an explicit `raknet://host:port` endpoint in `server_url`. The URI
 cannot contain user information, a path, a query or a fragment. RakNet supports
-protocol 2193 only.
+protocols 1001 and 2193.
 See the runnable [RakNet connection example](examples/raknet_connect.py).
 
 On RakNet, `server_key_sha256` is an optional SHA-256 pin of the DER-encoded

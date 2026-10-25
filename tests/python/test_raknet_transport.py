@@ -160,23 +160,26 @@ class RakNetPeers:
         monkeypatch.setattr(_adapter(), "open_connection", open_connection)
 
 
-def test_raknet_options_require_explicit_url_and_protocol_2193():
+def test_raknet_options_require_explicit_url_and_supported_protocol():
     for url in ("", "127.0.0.1:19132", "raknet://host", "raknet://host:0", "raknet://host:65536",
                 "raknet://user@host:19132", "raknet://host:19132/path", "raknet://host:19132?x=1"):
         with pytest.raises(ValueError):
             _raknet_options(server_url=url)._validate()
-    with pytest.raises(ValueError, match="requires protocol 2193"):
-        _raknet_options(protocol=1001)._validate()
+    for protocol in (1001, 2193):
+        _raknet_options(protocol=protocol)._validate()
+    with pytest.raises(ValueError, match="supported protocols"):
+        _raknet_options(protocol=1)._validate()
     with pytest.raises(ValueError, match="transport"):
         api.BotOptions(server_url="http://peer", transport="udp")._validate()
 
 
+@pytest.mark.parametrize("protocol", [1001, 2193])
 @pytest.mark.parametrize("pinned", [False, True])
-async def test_encrypted_login_spawn_and_reconnect_use_fresh_cipher(monkeypatch, pinned):
+async def test_encrypted_login_spawn_and_reconnect_use_fresh_cipher(monkeypatch, protocol, pinned):
     peers = RakNetPeers(monkeypatch, compression_threshold=256)
     async with api.Runtime() as runtime:
         pin = peers.pin if pinned else ""
-        bot = runtime.add_bot(_raknet_options(server_key_sha256=pin))
+        bot = runtime.add_bot(_raknet_options(protocol=protocol, server_key_sha256=pin))
         session_keys = []
         for index in range(2):
             if index:
@@ -198,7 +201,7 @@ async def test_encrypted_login_spawn_and_reconnect_use_fresh_cipher(monkeypatch,
 
             # Independently decode captured post-handshake client traffic with a
             # fresh native codec. A plaintext packet 4 or stale reconnect key fails.
-            encrypted = BatchCodec(bp.Codec(2193))
+            encrypted = BatchCodec(bp.Codec(protocol))
             encrypted.set_compression(Compression.ZLIB, 256)
             encrypted.enable_encryption(peer.session_key)
             decoded = [encrypted.decode(wire) for wire in peer.encrypted_client_wires]
@@ -209,13 +212,31 @@ async def test_encrypted_login_spawn_and_reconnect_use_fresh_cipher(monkeypatch,
 
             damaged = bytearray(peer.encrypted_client_wires[0])
             damaged[-1] ^= 1
-            verifier = BatchCodec(bp.Codec(2193))
+            verifier = BatchCodec(bp.Codec(protocol))
             verifier.set_compression(Compression.ZLIB, 256)
             verifier.enable_encryption(peer.session_key)
             with pytest.raises(bp.ProtocolError, match="checksum mismatch"):
                 verifier.decode(damaged)
 
         assert session_keys[0] != session_keys[1]
+        await bot.disconnect()
+    assert all(peer.closed for peer in peers.connections)
+
+
+@pytest.mark.parametrize("protocol", [1001, 2193])
+async def test_unpinned_plaintext_login_spawn_and_reconnect_without_handshake(monkeypatch, protocol):
+    peers = RakNetPeers(monkeypatch, server_handshake=False, compression_threshold=256)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(_raknet_options(protocol=protocol))
+        for index in range(2):
+            if index:
+                await bot.reconnect()
+            await bot.wait_ready(2)
+            peer = peers.connections[-1]
+            assert bot.get_status().state == api.BotState.ready
+            assert peer.handshake_token is None
+            assert peer.session_key is None
+            assert not any(packet.packet_id == 4 for packet in peer.received)
         await bot.disconnect()
     assert all(peer.closed for peer in peers.connections)
 

@@ -145,8 +145,8 @@ supports protocols 1001 and 2193 without a second game-layer encryption stream.
 
 RakNet is opt-in with `BotOptions(transport="raknet")`, the optional `raknet`
 extra and a `server_url` of the form `raknet://host:port`. The URI cannot contain
-user information, a path, a query or a fragment. RakNet supports protocol 2193
-only. When the server sends a signed game handshake, RakNet enables native game
+user information, a path, a query or a fragment. RakNet supports protocols 1001
+and 2193. When the server sends a signed game handshake, RakNet enables native game
 encryption and uses the native batch codec over reliable ordered FE framing; it
 does not use DTLS. Without a pin, the server may omit the handshake and still
 report login success.

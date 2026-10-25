@@ -1,10 +1,47 @@
 import base64
 import zlib
+from pathlib import Path
 
 import pytest
 from peer import Peer, Peers, until
 
 import bedrock_bot as api
+
+
+@pytest.mark.parametrize("version", [1001, 2193])
+async def test_login_success_last_gates_ready_and_initializes_in_order(monkeypatch, version):
+    def spawn(self):
+        p = self.p
+        game = self.codec.decode_packet(
+            (Path(__file__).parent / "fixtures" / f"start_game_{self.version}.bin").read_bytes()
+        ).payload
+        self.send(game, p.ItemRegistryPacket(items=[]))
+        self.send(p.ChunkRadiusUpdatedPacket(chunk_radius=16), p.PlayStatusPacket(status=p.PlayStatus.PLAYER_SPAWN))
+
+    monkeypatch.setattr(Peer, "spawn", spawn)
+    peers = Peers(monkeypatch)
+    async with api.Runtime() as runtime:
+        bot = runtime.add_bot(api.BotOptions(server_url="http://peer", protocol=version))
+        await until(lambda: bot._session is not None and bot._session.spawn)
+        peer = peers.connections[-1]
+        assert not bot._session.login
+        assert not bot._session.initialized
+        assert not bot._session.ready.done()
+        assert bot.get_status().state != api.BotState.ready
+        assert not any(packet.packet_id in (113, 312) for packet in peer.received)
+
+        peer.send(peer.p.PlayStatusPacket(status=peer.p.PlayStatus.LOGIN_SUCCESS))
+        await bot.wait_ready(2)
+        initialized = [packet for packet in peer.received if packet.packet_id in (113, 312)]
+        assert [packet.packet_id for packet in initialized] == [312, 312, 113]
+        assert [packet.loading_screen_packet_type for packet in initialized[:2]] == [
+            peer.p.ServerboundLoadingScreenPacketType.START_LOADING_SCREEN,
+            peer.p.ServerboundLoadingScreenPacketType.END_LOADING_SCREEN,
+        ]
+
+        peer.send(peer.p.PlayStatusPacket(status=peer.p.PlayStatus.LOGIN_SUCCESS))
+        await until(lambda: bot.capture_statistics().packet_counts_in[2] == 3)
+        assert [packet.packet_id for packet in peer.received if packet.packet_id in (113, 312)] == [312, 312, 113]
 
 
 def read_varuint(data, offset):

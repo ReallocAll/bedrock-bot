@@ -3,7 +3,8 @@ import asyncio
 import pytest
 
 
-async def test_native_raknet_loopback_frames_application_batch_and_uses_expected_qos(monkeypatch):
+@pytest.mark.parametrize("protocol", [1001, 2193])
+async def test_native_raknet_loopback_frames_application_batch_and_uses_expected_qos(monkeypatch, protocol):
     pytest.importorskip("raknet")
     import raknet.asyncio
 
@@ -28,7 +29,11 @@ async def test_native_raknet_loopback_frames_application_batch_and_uses_expected
     client = server_connection = None
     try:
         host, port = server.local_address
-        options = type("Options", (), {"server_url": f"raknet://{host}:{port}", "connect_timeout_ms": 20})()
+        options = type(
+            "Options",
+            (),
+            {"server_url": f"raknet://{host}:{port}", "connect_timeout_ms": 20, "protocol": protocol},
+        )()
         client = await raknet_transport.open_connection(options)
         server_connection = await asyncio.wait_for(server.accept(), 5)
 

@@ -33,9 +33,6 @@ async def _open_connection(options: "BotOptions", identity: "Identity") -> "Conn
         return await open_connection(options)
     if selected_transport != "nethernet":
         raise ValueError("transport must be 'nethernet' or 'raknet'")
-    if not options.server_key_sha256:
-        raise ValueError("a server identity key pin is required")
-
     class BotIdentitySigner(IdentitySigner):
         def sign(self, sdp: str) -> str:
             return insert_identity(
@@ -43,7 +40,9 @@ async def _open_connection(options: "BotOptions", identity: "Identity") -> "Conn
             )
 
     def verify_server(server_identity) -> None:
-        if not hmac.compare_digest(server_identity.key_digest, options.server_key_sha256):
+        if options.server_key_sha256 and not hmac.compare_digest(
+            server_identity.key_digest, options.server_key_sha256
+        ):
             raise InvalidIdentity("server identity key pin mismatch")
 
     timeout = options.connect_timeout_ms / 1000

@@ -312,7 +312,7 @@ async def villager_cycle(
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-url", required=True)
-    parser.add_argument("--server-key-sha256", required=True)
+    parser.add_argument("--server-key-sha256", default="")
     parser.add_argument("--name", default="python-villager-cycle")
     parser.add_argument("--uuid", default="")
     parser.add_argument("--protocol", type=int, default=2193, choices=(1001, 2193))

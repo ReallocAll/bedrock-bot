@@ -8,11 +8,9 @@ with an opt-in RakNet transport. Gameplay support covers protocols **1001** and
 ## Quick start
 
 Use Python 3.12 or newer with the matching native protocol runtime installed.
-The server must provide a NetherNet HTTP signaling endpoint. Obtain its public
-identity key digest through a trusted channel before connecting.
+The server must provide a NetherNet HTTP signaling endpoint.
 
-Save this as `connect.py`, then pass the endpoint and its verified SHA-256 digest
-as arguments:
+Save this as `connect.py`, then pass the endpoint:
 
 ```python
 import asyncio
@@ -25,7 +23,8 @@ async def main():
     async with Runtime() as runtime:
         bot = runtime.add_bot(BotOptions(
             server_url=sys.argv[1],
-            server_key_sha256=sys.argv[2],
+            # Optional identity-key pin:
+            # server_key_sha256="VERIFIED_64_HEX_DIGIT_SHA256",
             name="ExampleBot",
         ))
         await bot.wait_ready(60)
@@ -40,14 +39,15 @@ asyncio.run(
 ```
 
 ```shell
-python connect.py http://server.example:19672 "VERIFIED_64_HEX_DIGIT_SHA256"
+python connect.py http://server.example:19672
 ```
 
-The digest is required for the default NetherNet transport: the client verifies
-the signed server identity, SDP fingerprint and configured key. NetherNet
-provides DTLS encryption. RakNet setup and its optional game-handshake key pin
-are described below. Xbox account authentication is not provided; an offline
-XUID is only a declared identity field.
+With or without a key pin, NetherNet's library verifies the server identity
+statement signature and SDP fingerprint signature and establishes DTLS. The
+optional `server_key_sha256` pin strictly checks the expected identity key digest
+when provided. RakNet setup and its optional game-handshake key pin are described
+below. Xbox account authentication is not provided; an offline XUID is only a
+declared identity field.
 
 ## Installation
 
@@ -73,10 +73,11 @@ from their declared sources; the NetherNet Git dependency requires network acces
 
 ## RakNet
 
-NetherNet remains the default transport and requires `server_key_sha256` to pin
-the server identity. For RakNet, set `transport="raknet"` and pass an explicit
-`raknet://host:port` endpoint in `server_url`; the URI cannot contain user
-information, a path, a query or a fragment. RakNet supports protocol 2193 only.
+NetherNet remains the default transport; its optional `server_key_sha256` pin
+checks the expected server identity key. For RakNet, set `transport="raknet"`
+and pass an explicit `raknet://host:port` endpoint in `server_url`. The URI
+cannot contain user information, a path, a query or a fragment. RakNet supports
+protocol 2193 only.
 See the runnable [RakNet connection example](examples/raknet_connect.py).
 
 On RakNet, `server_key_sha256` is an optional SHA-256 pin of the DER-encoded

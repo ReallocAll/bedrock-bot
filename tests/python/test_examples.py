@@ -101,13 +101,20 @@ def test_examples_validate_cli_before_any_connection():
     cycle_args = [*base, "--trader-unique-id", "-92", "--attack-target-unique-id", "-93"]
     assert first.parse_args(first_args).prepared_items == {"minecraft:wheat": 4}
     assert cycle.parse_args(cycle_args).prepared_wheat == 2048
+    base_without_pin = ["--server-url", "http://127.0.0.1:19132", "--archive", "test.json"]
+    first_without_pin = [*base_without_pin, "--target-unique-id", "-92", "--prepared-item", "minecraft:wheat=4"]
+    cycle_without_pin = [*base_without_pin, "--trader-unique-id", "-92", "--attack-target-unique-id", "-93"]
+    assert first.parse_args(first_without_pin).options.server_key_sha256 == ""
+    assert cycle.parse_args(cycle_without_pin).options.server_key_sha256 == ""
     for module, args, extra in (
         (first, first_args, ["--operation-timeout", "nan"]),
         (first, first_args, ["--stage-extra", "0"]),
         (first, first_args, ["--target-unique-id", str(1 << 63)]),
         (first, first_args, ["--prepared-item", "wheat=-1"]),
+        (first, first_without_pin, ["--server-key-sha256", "not-a-pin"]),
         (cycle, cycle_args, ["--restock-timeout", "inf"]),
         (cycle, cycle_args, ["--attack-target-unique-id", "-92"]),
+        (cycle, cycle_without_pin, ["--server-key-sha256", "not-a-pin"]),
     ):
         with pytest.raises(SystemExit):
             module.parse_args([*args, *extra])

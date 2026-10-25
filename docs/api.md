@@ -138,9 +138,10 @@ failure does not undo already counted headers. Both play histograms are immutabl
 ## Transport and limits
 
 NetherNet is the default transport. It uses HTTP signaling and DTLS encryption,
-and verifies the signed server identity, SDP fingerprint and required configured
-server key digest. It supports protocols 1001 and 2193 without a second
-game-layer encryption stream.
+and always verifies the server identity statement signature and SDP fingerprint
+signature through the underlying library. The optional `server_key_sha256` pin
+strictly checks the expected server identity key when supplied. NetherNet
+supports protocols 1001 and 2193 without a second game-layer encryption stream.
 
 RakNet is opt-in with `BotOptions(transport="raknet")`, the optional `raknet`
 extra and a `server_url` of the form `raknet://host:port`. The URI cannot contain
@@ -184,5 +185,6 @@ adds exhaustion, natural restock, another trade, an attack and reconnect. They
 preserve unrelated inventory and reject stale references or uncertain outcomes.
 
 Prepare the world and target entities before using these examples. Their CLIs
-require `--server-url`, `--server-key-sha256`, target unique IDs and an output
-`--archive`. Run either script with `--help` for preparation and timeout arguments.
+require `--server-url`, target unique IDs and an output `--archive`;
+`--server-key-sha256` is optional. Run either script with `--help` for preparation
+and timeout arguments.

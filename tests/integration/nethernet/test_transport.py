@@ -1,8 +1,11 @@
 import asyncio
+import base64
+import json
+import logging
 import subprocess
 import sys
+import warnings
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import nethernet
 import pytest
@@ -17,19 +20,53 @@ def options(url, pin):
     return SimpleNamespace(server_url=url, server_key_sha256=pin, connect_timeout_ms=3000)
 
 
-async def test_missing_pin_rejects_before_transport_io(monkeypatch):
-    dial = AsyncMock()
-    monkeypatch.setattr(nethernet, "connect_http", dial)
-    with pytest.raises(ValueError, match="pin"):
-        await transport._open_connection(options("http://127.0.0.1:1", ""), None)
-    assert not dial.called
+def tamper_identity(sdp, fault):
+    lines = sdp.splitlines(keepends=True)
+    identity_line = next(index for index, line in enumerate(lines) if line.startswith("a=identity:"))
+    newline = "\r\n" if lines[identity_line].endswith("\r\n") else "\n"
+    if fault == "malformed":
+        lines[identity_line] = f"a=identity:!{newline}"
+        return "".join(lines)
+
+    envelope = json.loads(base64.b64decode(lines[identity_line][len("a=identity:") :].strip()))
+    assertion = json.loads(envelope["assertion"])
+    field = "token" if fault == "bad-identity-signature" else "fingerprints"
+    parts = assertion[field].split(".")
+    signature = parts[-1]
+    parts[-1] = ("A" if signature[0] != "A" else "B") + signature[1:]
+    assertion[field] = ".".join(parts)
+    envelope["assertion"] = json.dumps(assertion, separators=(",", ":"))
+    encoded = base64.b64encode(json.dumps(envelope, separators=(",", ":")).encode()).decode()
+    lines[identity_line] = f"a=identity:{encoded}{newline}"
+    return "".join(lines)
 
 
-async def test_adapter_signs_session_identity_and_verifies_pinned_server():
+class TamperedIdentitySigner(nethernet.IdentitySigner):
+    def __init__(self, private_key, fault):
+        super().__init__(private_key, domain="test.example")
+        self.fault = fault
+
+    def sign(self, sdp):
+        return tamper_identity(super().sign(sdp), self.fault)
+
+
+async def test_adapter_signs_session_identity_and_verifies_server_with_optional_pin(
+    monkeypatch, caplog, capsys
+):
     server_key = nethernet.generate_operator_key()
     identity = create_identity("signed test", "00000000-0000-0000-0000-000000000001")
     signer = nethernet.IdentitySigner(server_key, domain="test.example")
+    expected_pin = cpk_digest(server_key.public_key())
     offers = []
+    callbacks = []
+
+    connect_http = transport.connect_http
+
+    async def record_callback(*args, **kwargs):
+        callbacks.append(kwargs.get("on_server_identity"))
+        return await connect_http(*args, **kwargs)
+
+    monkeypatch.setattr(transport, "connect_http", record_callback)
 
     def validate(offer):
         assert offer.identity.domain == "offline.endstone.invalid"
@@ -48,10 +85,25 @@ async def test_adapter_signs_session_identity_and_verifies_pinned_server():
         identity_signer=signer,
         validate_offer=validate,
     ) as server:
-        conn = await transport._open_connection(
-            options(f"http://127.0.0.1:{server.bound_port}", cpk_digest(server_key.public_key())),
-            identity,
-        )
+        url = f"http://127.0.0.1:{server.bound_port}"
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            with caplog.at_level(logging.WARNING):
+                caplog.clear()
+                conn = await transport._open_connection(options(url, ""), identity)
+                try:
+                    payload = b"\x01wire-without-raknet-prefix" * 12000
+                    await conn.send(payload)
+                    assert await asyncio.wait_for(conn.recv(), 5) == payload
+                finally:
+                    await conn.close()
+                    await conn.close()
+        assert not caught_warnings
+        assert not caplog.records
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
+        conn = await transport._open_connection(options(url, expected_pin), identity)
         try:
             payload = b"\x01wire-without-raknet-prefix" * 12000
             await conn.send(payload)
@@ -59,15 +111,18 @@ async def test_adapter_signs_session_identity_and_verifies_pinned_server():
         finally:
             await conn.close()
             await conn.close()
-    assert len(offers) == 1
+    assert len(offers) == 2
+    assert len(callbacks) == 2
+    assert all(callback is not None for callback in callbacks)
 
 
-@pytest.mark.parametrize("assertion", ["missing", "wrong-key"])
-async def test_adapter_rejects_missing_or_unpinned_server_identity(assertion):
+@pytest.mark.parametrize(
+    "assertion", ["missing", "malformed", "bad-identity-signature", "bad-fingerprint-signature"]
+)
+async def test_adapter_rejects_unverified_server_identity_without_pin(assertion):
     key = nethernet.generate_operator_key()
-    other = nethernet.generate_operator_key()
-    signer = nethernet.IdentitySigner(key, domain="test.example") if assertion != "missing" else None
-    identity = SimpleNamespace(key=other, token="local-test-token")
+    signer = None if assertion == "missing" else TamperedIdentitySigner(key, assertion)
+    identity = create_identity("invalid server test", "00000000-0000-0000-0000-000000000001")
 
     async def handler(conn):
         await conn.wait_closed()
@@ -79,6 +134,27 @@ async def test_adapter_rejects_missing_or_unpinned_server_identity(assertion):
         identity_signer=signer,
     ) as server:
         with pytest.raises(nethernet.InvalidIdentity):
+            await transport._open_connection(
+                options(f"http://127.0.0.1:{server.bound_port}", ""),
+                identity,
+            )
+
+
+async def test_adapter_rejects_mismatched_server_pin():
+    key = nethernet.generate_operator_key()
+    other = nethernet.generate_operator_key()
+    identity = create_identity("wrong pin test", "00000000-0000-0000-0000-000000000001")
+
+    async def handler(conn):
+        await conn.wait_closed()
+
+    async with nethernet.serve_http(
+        handler,
+        host="127.0.0.1",
+        ice_servers=[RTCIceServer(urls=[])],
+        identity_signer=nethernet.IdentitySigner(key, domain="test.example"),
+    ) as server:
+        with pytest.raises(nethernet.InvalidIdentity, match="pin mismatch"):
             await transport._open_connection(
                 options(f"http://127.0.0.1:{server.bound_port}", cpk_digest(other.public_key())),
                 identity,

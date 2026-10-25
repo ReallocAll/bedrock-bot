@@ -57,8 +57,8 @@ def connection_options(args):
     parsed = urlsplit(args.server_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("server-url must be an HTTP signaling URL without credentials")
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", args.server_key_sha256):
-        raise ValueError("server-key-sha256 must be an explicit 64-digit hexadecimal pin")
+    if args.server_key_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", args.server_key_sha256):
+        raise ValueError("server-key-sha256 must be empty or a 64-digit hexadecimal pin")
     if not args.name.strip():
         raise ValueError("name must not be empty")
     if args.uuid and (len(args.uuid) != 36 or str(UUID(args.uuid)) != args.uuid.lower()):
@@ -364,7 +364,7 @@ async def first_trade(
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-url", required=True)
-    parser.add_argument("--server-key-sha256", required=True)
+    parser.add_argument("--server-key-sha256", default="")
     parser.add_argument("--protocol", type=int, default=2193, choices=(1001, 2193))
     parser.add_argument("--name", default="python-trader")
     parser.add_argument("--uuid", default="")

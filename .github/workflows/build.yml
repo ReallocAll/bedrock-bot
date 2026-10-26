@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: ReallocAll/bedrock-bench
-          ref: main
+          ref: 9fc73fcba7b2504411028735afeee24db17a8d3b
           path: dependency/bedrock-bench
           persist-credentials: false
       - name: Record the tested dependency graph

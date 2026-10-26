@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,13 +41,13 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: ReallocAll/bedrock-protocol
-          ref: main
+          ref: 3df56840473709205ad3b1772adf77d28a9f4635
           path: dependency/bedrock-protocol
           persist-credentials: false
       - uses: actions/checkout@v7.0.1
         with:
           repository: ReallocAll/bedrock-bench
-          ref: 9fc73fcba7b2504411028735afeee24db17a8d3b
+          ref: 1dc696609a7e1b271d65f1d4022d6d63b7f0d089
           path: dependency/bedrock-bench
           persist-credentials: false
       - name: Record the tested dependency graph
@@ -102,20 +103,22 @@ jobs:
           tools.build:jobs=2
           EOF
           fi
-      - name: Build protocol distributions
-        run: |
-          protocol="$GITHUB_WORKSPACE/dependency/bedrock-protocol"
-          python -m build "$protocol" --outdir "$RUNNER_TEMP/protocol-pure"
-          python "$protocol/scripts/stage_native.py" "$protocol" "$RUNNER_TEMP/protocol-native-source"
-          python -m build --sdist "$RUNNER_TEMP/protocol-native-source" --outdir "$RUNNER_TEMP/protocol-native"
-          archives=("$RUNNER_TEMP"/protocol-native/*.tar.gz)
-          test "${#archives[@]}" -eq 1
-          mkdir "$RUNNER_TEMP/protocol-native-sdist"
-          python -m tarfile -e "${archives[0]}" "$RUNNER_TEMP/protocol-native-sdist" --filter data
-          sources=("$RUNNER_TEMP"/protocol-native-sdist/*)
-          test "${#sources[@]}" -eq 1
-          python -m build --wheel "${sources[0]}" --outdir "$RUNNER_TEMP/protocol-native" \
-            -C host-profile=delivery -C build-profile=delivery -C "build-dir=$RUNNER_TEMP/protocol-native-build"
+      - name: Download validated pure protocol artifact
+        uses: actions/download-artifact@v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          repository: ReallocAll/bedrock-protocol
+          run-id: 40091787005
+          name: python-pure
+          path: ${{ runner.temp }}/protocol-pure
+      - name: Download validated native protocol artifact
+        uses: actions/download-artifact@v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          repository: ReallocAll/bedrock-protocol
+          run-id: 40091787005
+          name: python-native-${{ runner.os }}
+          path: ${{ runner.temp }}/protocol-native
       - name: Build SDK distributions
         run: python -m build "$GITHUB_WORKSPACE" --outdir "$RUNNER_TEMP/sdk-dist"
       - name: Build benchmark consumer distributions

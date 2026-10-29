@@ -1,4 +1,4 @@
-"""Codec-built server packets and independent legacy transaction assertions."""
+"""Codec-built server packets for trade tests."""
 
 from contextlib import asynccontextmanager
 

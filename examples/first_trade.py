@@ -1,4 +1,4 @@
-"""One observed trade with a nonzero residual return; server preparation is external."""
+"""One observed trade with a nonzero residual return."""
 
 from __future__ import annotations
 

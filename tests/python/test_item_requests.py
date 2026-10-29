@@ -1,4 +1,4 @@
-"""Controlled native-codec bytes; transaction oracles come from legacy C++ tests."""
+"""Item request tests over controlled native-codec bytes."""
 
 import dataclasses
 

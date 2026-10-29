@@ -1,4 +1,4 @@
-"""Independent legacy regressions through controlled native-codec peer bytes."""
+"""Review regression tests over controlled native-codec peer bytes."""
 
 import bedrock_protocol as bp
 import pytest

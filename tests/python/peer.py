@@ -1,4 +1,4 @@
-"""Controlled bytes peer; StartGame vectors come from the independent protocol goldens."""
+"""Controlled bytes peer for protocol tests."""
 
 import asyncio
 import base64

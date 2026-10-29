@@ -1,4 +1,4 @@
-"""Finite controlled-byte cycle; real villager work/restock is a separate gate."""
+"""Controlled-byte villager cycle tests."""
 
 import dataclasses
 

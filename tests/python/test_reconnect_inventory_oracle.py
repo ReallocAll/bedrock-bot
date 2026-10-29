@@ -1,4 +1,4 @@
-"""Small independent inventory records; no live reconnect or gameplay claim."""
+"""Reconnect inventory oracle tests."""
 
 import copy
 import importlib

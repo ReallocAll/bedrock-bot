@@ -1,5 +1,5 @@
-import pytest
 import bedrock_protocol as bp
+import pytest
 from peer import Peers, until
 
 import endpilot as api
@@ -63,7 +63,7 @@ async def test_unknown_packet_uses_typed_send_queue_without_a_new_raw_transmitte
         peer = peers.connections[-1]
         known = set(peer.codec.supported_packet_ids)
         unknown_id = next(value for value in range(1023, 0, -1) if value not in known)
-        body = b"\\x00\\xfe\\x81\\x00"
+        body = b"\x00\xfe\x81\x00"
         peer.pause_sender(bot)
         bot.send_packet(bp.UnknownPacket(packet_id=unknown_id, body=body))
         with pytest.raises(bp.EncodeError, match="known_packet_requires_typed_value"):

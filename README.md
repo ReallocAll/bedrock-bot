@@ -1,13 +1,9 @@
 # Endpilot
 
-Endpilot is an asynchronous Python bot framework for Minecraft: Bedrock Edition,
-aiming to provide a Mineflayer-like development experience. It manages
-connections, movement, world observations, inventories and trading over NetherNet
-by default, with an opt-in RakNet transport. Gameplay support covers protocols
-**1001** and **2193** over NetherNet and RakNet.
-
-Endpilot is designed to complement the Endstone ecosystem but is not an Endstone
-server plugin or an official EndstoneMC project.
+Endpilot is an asynchronous Python bot framework for Minecraft: Bedrock Edition.
+It manages connections, movement, world observations, inventories and trading over
+NetherNet by default, with an opt-in RakNet transport. Gameplay support covers
+protocols **1001** and **2193** over NetherNet and RakNet.
 
 ## Quick start
 

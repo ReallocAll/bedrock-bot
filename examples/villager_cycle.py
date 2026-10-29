@@ -22,7 +22,7 @@ from first_trade import (
     validate_parameters,
 )
 
-import bedrock_bot as bb
+import endpilot as bb
 
 WHEAT, EMERALD = "minecraft:wheat", "minecraft:emerald"
 

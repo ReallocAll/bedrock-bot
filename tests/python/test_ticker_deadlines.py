@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import bedrock_bot as api
-from bedrock_bot import session as session_module
+import endpilot as api
+from endpilot import session as session_module
 
 
 class Clock:

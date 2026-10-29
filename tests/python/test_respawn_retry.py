@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import bedrock_bot as api
-from bedrock_bot.session import Session
+import endpilot as api
+from endpilot.session import Session
 
 
 def ready_bot(protocol):

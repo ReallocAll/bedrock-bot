@@ -15,8 +15,8 @@ from trade_peer import (
     trade_packet,
 )
 
-import bedrock_bot as api
-from bedrock_bot._projection import project
+import endpilot as api
+from endpilot._projection import project
 
 
 @pytest.mark.parametrize("version", [1001, 2193])

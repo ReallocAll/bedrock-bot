@@ -19,7 +19,7 @@ from trade_peer import (
     wire_slot,
 )
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def inventory_record(bot):

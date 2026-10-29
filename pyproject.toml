@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bedrock-bot"
+name = "endpilot"
 version = "0.1.0"
-description = "Typed asynchronous Bedrock bots over NetherNet"
+description = "Asynchronous Python bot framework for Minecraft: Bedrock Edition"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -21,12 +21,15 @@ dependencies = [
 test = ["pytest>=8", "pytest-asyncio>=1.4"]
 raknet = ["raknet==0.4.0"]
 
+[project.urls]
+Repository = "https://github.com/ReallocAll/endpilot"
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/bedrock_bot"]
+packages = ["src/endpilot"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/src/bedrock_bot/**",
+    "/src/endpilot/**",
     "/tests/python/**",
     "/tests/conftest.py",
     "/tests/integration/nethernet/test_transport.py",

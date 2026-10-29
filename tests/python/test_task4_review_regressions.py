@@ -16,7 +16,7 @@ from trade_peer import (
     trade_packet,
 )
 
-import bedrock_bot as api
+import endpilot as api
 
 
 async def prepare_window_trigger(bot, peer):

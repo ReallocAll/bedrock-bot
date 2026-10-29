@@ -8,7 +8,7 @@ import pytest
 from peer import Peers, actor_packet, motion_packet, slot_packet, submit, trade_packet, until
 from test_benchmark_hooks import dimension_ack
 
-import bedrock_bot as api
+import endpilot as api
 
 
 @pytest.mark.parametrize("version", [1001, 2193])
@@ -471,7 +471,7 @@ async def test_server_operation_response_once_stale_session_ignored(monkeypatch,
 
 
 async def test_partial_dial_cancellation_joins_opener_cleanup(monkeypatch):
-    from bedrock_bot import transport
+    from endpilot import transport
 
     entered = asyncio.Event()
     cleanup = asyncio.Event()
@@ -571,8 +571,8 @@ async def test_queue_limits_fail_visibly_and_bound_typed_payload(monkeypatch):
 def test_process_exits_within_twenty_seconds():
     code = """
 import asyncio
-from bedrock_bot import Runtime, BotOptions
-from bedrock_bot import transport
+from endpilot import Runtime, BotOptions
+from endpilot import transport
 import runpy, sys
 Peer = runpy.run_path(sys.argv[1])["Peer"]
 async def open(options, identity): return Peer().connection
@@ -630,7 +630,7 @@ async def test_radius_blob_subchunk_and_chunk_notifications(monkeypatch, version
 
 
 async def test_no_listener_never_constructs_notification_payload(monkeypatch):
-    from bedrock_bot import events
+    from endpilot import events
 
     peers = Peers(monkeypatch)
 
@@ -736,7 +736,7 @@ async def test_background_failure_from_ready_callback_reaches_wait_ready_once(mo
 
 
 async def test_failed_dial_and_spawn_deadline_join_all_tasks(monkeypatch):
-    from bedrock_bot import transport
+    from endpilot import transport
 
     async def refused(options, identity):
         raise OSError("dial failed")
@@ -758,7 +758,7 @@ async def test_failed_dial_and_spawn_deadline_join_all_tasks(monkeypatch):
 
 @pytest.mark.parametrize("reconnect", [False, True], ids=["initial", "reconnect"])
 async def test_wait_ready_preserves_completed_dial_failure(monkeypatch, reconnect):
-    from bedrock_bot import transport
+    from endpilot import transport
 
     error = OSError("dial failed before readiness wait")
 
@@ -816,7 +816,7 @@ async def test_nonfinite_actor_packet_fails_without_publishing_motion(monkeypatc
 async def test_review_timeout_unwind_is_joined_without_second_cancellation(monkeypatch, intent):
     from peer import Peer
 
-    from bedrock_bot import transport
+    from endpilot import transport
 
     unwinding = asyncio.Event()
     release = asyncio.Event()
@@ -1065,7 +1065,7 @@ async def test_wait_ready_timeout_then_close_has_no_loop_error(monkeypatch, clos
 async def test_wait_ready_interrupted_waiter_preserves_later_result(monkeypatch, interruption, outcome):
     from peer import Peer
 
-    from bedrock_bot import transport
+    from endpilot import transport
 
     entered = asyncio.Event()
     release = asyncio.Event()

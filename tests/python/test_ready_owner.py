@@ -4,8 +4,8 @@ import sys
 import pytest
 from peer import Peer
 
-import bedrock_bot as api
-from bedrock_bot import transport
+import endpilot as api
+from endpilot import transport
 
 
 @pytest.mark.parametrize("pending_failure", [False, True])

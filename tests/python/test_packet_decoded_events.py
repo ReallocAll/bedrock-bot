@@ -6,7 +6,7 @@ import pytest
 from peer import Peers, until
 from test_statistics import framed, uvarint
 
-import bedrock_bot as api
+import endpilot as api
 
 
 async def test_packet_events_interleave_recovery_before_business_and_retain_native_ownership(monkeypatch):

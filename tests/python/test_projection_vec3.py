@@ -5,8 +5,8 @@ import bedrock_protocol as bp
 import pytest
 from peer import Peers, actor_packet, motion_packet, until
 
-import bedrock_bot as api
-from bedrock_bot._projection import project
+import endpilot as api
+from endpilot._projection import project
 
 
 def test_exact_public_vector_keeps_identity_and_immutability():

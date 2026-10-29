@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import bedrock_protocol as bp
 from peer import Peers, actor_packet, empty_item, until
 
-import bedrock_bot as api
+import endpilot as api
 
 CRAFT_RESULT_BODIES = {
     1001: bytes.fromhex("54010000000a00000000000000000000"),

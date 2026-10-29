@@ -17,7 +17,7 @@ from trade_peer import (
     trade_packet,
 )
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def load_example(name):

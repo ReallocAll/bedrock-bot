@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from peer import Peer, Peers, until
 
-import bedrock_bot as api
+import endpilot as api
 
 
 @pytest.mark.parametrize("version", [1001, 2193])

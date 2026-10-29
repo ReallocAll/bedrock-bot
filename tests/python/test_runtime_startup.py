@@ -8,15 +8,15 @@ import asyncio
 import sys
 from types import SimpleNamespace
 
-import bedrock_bot as api
+import endpilot as api
 
-required = ("bedrock_bot.session", "bedrock_bot.transport", "aiortc", "nethernet.identity")
+required = ("endpilot.session", "endpilot.transport", "aiortc", "nethernet.identity")
 assert all(name not in sys.modules for name in required)
 
 async def main():
     async with api.Runtime() as runtime:
         assert all(name in sys.modules for name in required)
-        from bedrock_bot import transport
+        from endpilot import transport
         attempted = asyncio.Event()
         closed = []
 

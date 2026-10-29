@@ -10,7 +10,7 @@ from test_benchmark_hooks import dimension_ack
 from test_respawn_retry import ready_bot
 from trade_peer import deliver, inventory_packet, scene
 
-import bedrock_bot as api
+import endpilot as api
 
 
 @dataclass(slots=True)
@@ -220,7 +220,7 @@ async def test_never_started_bot_disconnect_waiters_after_stop(monkeypatch):
 
 @pytest.mark.parametrize("intent", ["disconnect", "reconnect"])
 async def test_connecting_callback_invalidates_before_identity_and_dial(monkeypatch, intent):
-    from bedrock_bot import session
+    from endpilot import session
 
     peers = Peers(monkeypatch)
     identities = []

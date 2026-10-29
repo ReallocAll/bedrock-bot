@@ -1,4 +1,4 @@
-# Using bedrock-bot
+# Using Endpilot
 
 `Runtime` owns the bots and their asynchronous work. Enter it on the caller's
 asyncio loop, use bot methods on that same loop, and await context exit to close

@@ -7,7 +7,7 @@ import pytest
 from aiortc import RTCIceServer
 from peer import Peers, until
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def uvarint(value):

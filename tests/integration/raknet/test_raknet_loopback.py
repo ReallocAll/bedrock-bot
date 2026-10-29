@@ -8,7 +8,7 @@ async def test_native_raknet_loopback_frames_application_batch_and_uses_expected
     pytest.importorskip("raknet")
     import raknet.asyncio
 
-    from bedrock_bot import raknet_transport
+    from endpilot import raknet_transport
 
     send_options = []
     original_send = raknet.asyncio.Connection.send

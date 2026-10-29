@@ -42,7 +42,7 @@ class Bot:
         self._transition = True
         self._wake = asyncio.Event()
         self._session = None
-        self._lifetime = runtime._loop.create_task(self._run(), name="bedrock-bot-lifetime")
+        self._lifetime = runtime._loop.create_task(self._run(), name="endpilot-lifetime")
 
     def _guard(self, *, mutable=False):
         self._runtime._guard(deliver=mutable)

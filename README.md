@@ -1,9 +1,13 @@
-# bedrock-bot
+# Endpilot
 
-An asyncio client for Minecraft Bedrock automation. It manages connections,
-movement, world observations, inventories and trading over NetherNet by default,
-with an opt-in RakNet transport. Gameplay support covers protocols **1001** and
-**2193** over NetherNet and RakNet.
+Endpilot is an asynchronous Python bot framework for Minecraft: Bedrock Edition,
+aiming to provide a Mineflayer-like development experience. It manages
+connections, movement, world observations, inventories and trading over NetherNet
+by default, with an opt-in RakNet transport. Gameplay support covers protocols
+**1001** and **2193** over NetherNet and RakNet.
+
+Endpilot is designed to complement the Endstone ecosystem but is not an Endstone
+server plugin or an official EndstoneMC project.
 
 ## Quick start
 
@@ -16,7 +20,7 @@ Save this as `connect.py`, then pass the endpoint:
 import asyncio
 import sys
 
-from bedrock_bot import BotOptions, Runtime
+from endpilot import BotOptions, Runtime
 
 
 async def main():
@@ -58,7 +62,7 @@ your Python interpreter and platform. See the protocol project's
 for its compiler and native runtime packages.
 
 To use RakNet, install its optional transport dependency with
-`python -m pip install "bedrock-bot[raknet]"` (use `.[raknet]` when installing
+`python -m pip install "endpilot[raknet]"` (use `.[raknet]` when installing
 from a checkout).
 
 From this checkout or an extracted SDK source distribution, install into a virtual
@@ -131,10 +135,10 @@ and access to the compatible protocol wheels. The filenames below follow the
 current package version; use the filenames produced by your build:
 
 ```shell
-python -m pip install --find-links ../bedrock-protocol/dist "dist/bedrock_bot-0.1.0-py3-none-any.whl[test,raknet]"
-mkdir ../bedrock-bot-test-source
-tar -xf dist/bedrock_bot-0.1.0.tar.gz -C ../bedrock-bot-test-source
-cd ../bedrock-bot-test-source/bedrock_bot-0.1.0
+python -m pip install --find-links ../bedrock-protocol/dist "dist/endpilot-0.1.0-py3-none-any.whl[test,raknet]"
+mkdir ../endpilot-test-source
+tar -xf dist/endpilot-0.1.0.tar.gz -C ../endpilot-test-source
+cd ../endpilot-test-source/endpilot-0.1.0
 python -I -m pytest tests/python tests/integration/nethernet/test_transport.py tests/integration/raknet
 ```
 

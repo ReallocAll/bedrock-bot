@@ -8,7 +8,7 @@ import pytest
 def test_proactor_refusal_leaves_runtime_reusable_on_selector():
     code = """
 import asyncio
-from bedrock_bot import Runtime
+from endpilot import Runtime
 
 runtime = Runtime()
 

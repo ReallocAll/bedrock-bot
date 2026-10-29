@@ -10,9 +10,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from peer import Peer, Peers
 
-import bedrock_bot as api
-from bedrock_bot import auth, session, transport
-from bedrock_bot.auth import build_login, create_identity
+import endpilot as api
+from endpilot import auth, session, transport
+from endpilot.auth import build_login, create_identity
 
 UUID = "00000000-0000-0000-0000-000000000001"
 

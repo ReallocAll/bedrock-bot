@@ -5,7 +5,7 @@ import pytest
 from peer import Peers, actor_packet, empty_item, until
 from trade_peer import inventory_packet, registry_packet, response_info, stack
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def test_all_event_materialization_contracts():

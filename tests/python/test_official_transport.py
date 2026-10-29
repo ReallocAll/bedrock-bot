@@ -5,8 +5,8 @@ import pytest
 from bedrock_protocol.wire import Compression
 from peer import Peers, submit, until
 
-import bedrock_bot as api
-from bedrock_bot import transport
+import endpilot as api
+from endpilot import transport
 
 
 @pytest.mark.parametrize("protocol", [1001, 2193])

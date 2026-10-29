@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from peer import Peers
 
-import bedrock_bot as api
+import endpilot as api
 
 
 async def test_context_exit_preserves_body_exception_and_ends_bot_access(monkeypatch):
@@ -37,7 +37,7 @@ def test_failed_and_uninitialized_instances_are_collectable():
 def test_auth_independent_go_key_derivation_and_signed_limits():
     from cryptography.hazmat.primitives.asymmetric import ec
 
-    from bedrock_bot.auth import Identity, derive_session_key
+    from endpilot.auth import Identity, derive_session_key
 
     vectors = json.loads((Path(__file__).parent / "fixtures/wire_vectors.json").read_text())
     identity = Identity("test", "00000000-0000-0000-0000-000000000000", ec.derive_private_key(1, ec.SECP384R1()))

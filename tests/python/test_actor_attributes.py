@@ -3,7 +3,7 @@ import dataclasses
 import pytest
 from peer import Peers, actor_packet, slot_packet, until
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def attribute_data(p, name, minimum, current, maximum):

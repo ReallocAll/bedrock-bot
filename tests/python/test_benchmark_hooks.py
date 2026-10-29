@@ -4,7 +4,7 @@ import pytest
 from peer import Peer, Peers, until
 from test_statistics import framed, uvarint
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def dimension_ack(p, runtime_id):

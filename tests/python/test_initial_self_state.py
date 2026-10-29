@@ -7,7 +7,7 @@ from peer import Peer, Peers, until
 from test_actor_attributes import attribute_data, attribute_values
 from test_engineering_repairs import player_packet
 
-import bedrock_bot as api
+import endpilot as api
 
 
 def initial_peers(monkeypatch, early_packets):

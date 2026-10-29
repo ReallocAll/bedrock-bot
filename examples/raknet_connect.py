@@ -7,7 +7,7 @@ import asyncio
 import re
 import sys
 
-from bedrock_bot import BotOptions, Runtime
+from endpilot import BotOptions, Runtime
 
 
 def parse_args():

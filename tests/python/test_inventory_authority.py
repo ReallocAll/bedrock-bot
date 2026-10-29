@@ -3,7 +3,7 @@ import pytest
 from peer import empty_item
 from trade_peer import deliver, requests, response_packet, scene, sent, slot_events, stack
 
-import bedrock_bot as api
+import endpilot as api
 
 
 @pytest.mark.parametrize("version", [1001, 2193])

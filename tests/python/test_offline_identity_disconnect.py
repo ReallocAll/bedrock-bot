@@ -8,10 +8,10 @@ import pytest
 from peer import verify_login_token
 from test_identity_pin import unbase
 
-import bedrock_bot as api
-from bedrock_bot import transport
-from bedrock_bot.auth import build_login, create_identity
-from bedrock_bot.session import Session
+import endpilot as api
+from endpilot import transport
+from endpilot.auth import build_login, create_identity
+from endpilot.session import Session
 
 
 @pytest.mark.parametrize("xuid", ["", "0", "2535400000000000", "00042", "18446744073709551615"])

@@ -27,7 +27,7 @@ async def _open_connection(options: "BotOptions", identity: "Identity") -> "Conn
         except ModuleNotFoundError as error:
             if error.name == "raknet":
                 raise RuntimeError(
-                    "RakNet transport requires the optional dependency; install bedrock-bot[raknet]"
+                    "RakNet transport requires the optional dependency; install endpilot[raknet]"
                 ) from error
             raise
         return await open_connection(options)

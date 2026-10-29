@@ -12,8 +12,8 @@ import pytest
 from aiortc import RTCIceServer
 from nethernet.identity import cpk_digest, verify_fingerprints
 
-from bedrock_bot import transport
-from bedrock_bot.auth import create_identity
+from endpilot import transport
+from endpilot.auth import create_identity
 
 
 def options(url, pin):
@@ -206,8 +206,8 @@ from types import SimpleNamespace
 import nethernet
 from aiortc import RTCIceServer
 from nethernet.identity import cpk_digest
-from bedrock_bot import transport
-from bedrock_bot.auth import create_identity
+from endpilot import transport
+from endpilot.auth import create_identity
 async def main():
     key = nethernet.generate_operator_key()
     async def echo(conn):

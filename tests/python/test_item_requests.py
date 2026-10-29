@@ -32,7 +32,7 @@ from trade_peer import (
     wire_slot,
 )
 
-import bedrock_bot as api
+import endpilot as api
 
 
 @pytest.mark.parametrize("version", [1001, 2193])

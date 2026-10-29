@@ -157,7 +157,7 @@ class Peer:
 
 class Peers:
     def __init__(self, monkeypatch, *, automatic=True, server_handshake=True, compression_threshold=1):
-        from bedrock_bot import transport
+        from endpilot import transport
 
         self.connections = []
         self.automatic = automatic

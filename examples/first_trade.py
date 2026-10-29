@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
-import bedrock_bot as bb
+import endpilot as bb
 
 
 class Events:

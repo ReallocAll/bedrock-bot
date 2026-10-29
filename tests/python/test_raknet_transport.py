@@ -14,13 +14,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from peer import Peer, submit, until
 
-import bedrock_bot as api
-from bedrock_bot import transport
+import endpilot as api
+from endpilot import transport
 
 
 def _adapter():
     pytest.importorskip("raknet")
-    from bedrock_bot import raknet_transport
+    from endpilot import raknet_transport
 
     return raknet_transport
 
@@ -392,7 +392,7 @@ async def test_connection_failure_propagates_and_runtime_closes_session(monkeypa
 
 
 async def test_raknet_transport_import_is_optional(monkeypatch):
-    monkeypatch.delitem(sys.modules, "bedrock_bot.raknet_transport", raising=False)
+    monkeypatch.delitem(sys.modules, "endpilot.raknet_transport", raising=False)
     real_import = builtins.__import__
 
     def without_raknet(name, *args, **kwargs):

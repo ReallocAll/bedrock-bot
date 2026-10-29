@@ -55,6 +55,18 @@ jobs:
           printf 'SDK=%s\nPROTOCOL=%s\nBENCH=%s\n' "$GITHUB_SHA" \
             "$(git -C dependency/bedrock-protocol rev-parse HEAD)" \
             "$(git -C dependency/bedrock-bench rev-parse HEAD)"
+      - name: Resolve protocol revision
+        id: protocol
+        run: echo "revision=$(git -C dependency/bedrock-protocol rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Restore protocol distributions
+        id: protocol-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/protocol-pure
+            ${{ runner.temp }}/protocol-native
+          # Native wheels are OS/architecture/Python-ABI specific; bump v1 when the build recipe changes.
+          key: protocol-${{ runner.os }}-${{ runner.arch }}-py312-${{ steps.protocol.outputs.revision }}-v1
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
@@ -103,6 +115,7 @@ jobs:
           EOF
           fi
       - name: Build protocol distributions
+        if: steps.protocol-cache.outputs.cache-hit != 'true'
         run: |
           protocol="$GITHUB_WORKSPACE/dependency/bedrock-protocol"
           python -m build "$protocol" --outdir "$RUNNER_TEMP/protocol-pure"

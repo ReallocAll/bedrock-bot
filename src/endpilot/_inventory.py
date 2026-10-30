@@ -52,6 +52,8 @@ def resolve(s, name, index, dynamic=None):
         raise RuntimeError("dynamic item containers are unsupported")
     if name == 28 and 0 <= index <= 8:
         return 0, index
+    if name == 12 and 0 <= index <= 35:
+        return 0, index
     if name == 29 and 0 <= index <= 26:
         return 0, index + 9
     if (name, index) in ((47, 4), (48, 5)):
@@ -70,7 +72,12 @@ def resolve(s, name, index, dynamic=None):
 def scoped(s, slot):
     s.get_item(slot)
     if slot.area == InventoryArea.player and slot.window is None and 0 <= slot.index <= 35:
-        name, index = (28, slot.index) if slot.index < 9 else (29, slot.index - 9)
+        if slot.index < 9:
+            name, index = 28, slot.index
+        elif s.window is None:
+            name, index = 12, slot.index
+        else:
+            name, index = 29, slot.index - 9
     elif slot.area == InventoryArea.trade_input and 0 <= slot.index <= 1:
         name, index = 47 + slot.index, 4 + slot.index
     else:

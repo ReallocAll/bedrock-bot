@@ -103,12 +103,12 @@ async def test_move_exact_actions_no_optimism_and_odd_request_ids(monkeypatch, v
         assert len(request.actions) == 1
         place = action(request.actions[0])
         assert "Place" in type(place).__name__ and place.amount == 3
-        assert wire_slot(side(place, "source")) == (29, 0, 101)
+        assert wire_slot(side(place, "source")) == (12, 9, 101)
         assert wire_slot(side(place, "destination")) == (28, 0, 0)
         events.clear()
-        await deliver(bot, peer, response_packet(peer.p, -99, [(29, 0, 1, 999)]))
+        await deliver(bot, peer, response_packet(peer.p, -99, [(12, 9, 1, 999)]))
         assert not request_events(events) and bot.get_item(source).count == 10
-        peer.send(response_packet(peer.p, -1, [(29, 0, 7, 101), (28, 0, 3, 201)]))
+        peer.send(response_packet(peer.p, -1, [(12, 9, 7, 101), (28, 0, 3, 201)]))
         await until(lambda: len(request_events(events)) == 1)
         assert bot.get_item(source).count == 7 and bot.get_item(destination).count == 3
         assert bot.get_item(destination).stack_id == 201
@@ -173,7 +173,7 @@ async def test_submission_boundary_and_queued_cancellation_preserve_ids(monkeypa
         peer.pause_sender(bot)
         cancelled = bot.begin_move_item(bot.player_slot(9), bot.player_slot(0), 3)
         assert cancelled.phase == api.ItemOperationPhase.queued
-        await deliver(bot, peer, response_packet(peer.p, rows=[(29, 0, 7, 101), (28, 0, 3, 201)]))
+        await deliver(bot, peer, response_packet(peer.p, rows=[(12, 9, 7, 101), (28, 0, 3, 201)]))
         assert cancelled.result is None and bot.get_item(bot.player_slot(9)).count == 10
         assert bot.get_item(bot.player_slot(0)).count == 0
         assert bot.cancel_item_operation(cancelled) == api.ItemCancellation.cancelled
@@ -220,7 +220,7 @@ async def test_response_merge_is_atomic_and_invalidates_only_touched(monkeypatch
             await deliver(bot, peer, slot_packet(peer.p, 9, stack(peer.p, data=b"opaque full identity")))
         operation = bot.begin_move_item(bot.player_slot(9), bot.player_slot(0), 10 if case == "zero_source" else 3)
         await sent(peer)
-        rows = [(29, 0, 7, 101), (28, 0, 3, 201)]
+        rows = [(12, 9, 7, 101), (28, 0, 3, 201)]
         if case == "identical_alias":
             rows.append((28, 0, 3, 201))
         elif case.startswith("conflicting_alias"):
@@ -248,11 +248,11 @@ async def test_response_merge_is_atomic_and_invalidates_only_touched(monkeypatch
         elif case == "authoritative_conflict":
             await deliver(bot, peer, slot_packet(peer.p, 0, stack(peer.p, 43, 3, 999, data=b"foreign identity")))
         elif case == "atomic_unrelated":
-            rows = [(29, 11, 9, 701), *rows, (28, 0, 3, 999)]
+            rows = [(12, 20, 9, 701), *rows, (28, 0, 3, 999)]
         elif case == "additional_resolved_slot":
-            rows.append((29, 11, 9, 701))
+            rows.append((12, 20, 9, 701))
         elif case == "zero_source":
-            rows = [(29, 0, 0, 0), (28, 0, 10, 201)]
+            rows = [(12, 9, 0, 0), (28, 0, 10, 201)]
         events.clear()
         info = response_info(peer.p, rows=rows)
         peer.send(peer.p.ItemStackResponsePacket(responses=[info]))
@@ -303,7 +303,7 @@ async def test_only_post_submission_authority_can_fill_missing_response(monkeypa
             assert operation.phase == api.ItemOperationPhase.queued
             peer.resume_sender()
             await sent(peer)
-        rows = [(29, 0, 7, 101), (28, 0, 3, 201)] if authority == "queued_matching_id" else []
+        rows = [(12, 9, 7, 101), (28, 0, 3, 201)] if authority == "queued_matching_id" else []
         peer.send(response_packet(p, rows=rows, absent=not rows))
         result = await operation.wait(2)
         if authority in {"queued", "unchanged"}:
@@ -337,7 +337,7 @@ async def test_one_response_packet_cannot_complete_callback_created_request(monk
             peer,
             p.ItemStackResponsePacket(
                 responses=[
-                    response_info(p, -1, [(29, 0, 7, 101), (28, 0, 3, 201)]),
+                    response_info(p, -1, [(12, 9, 7, 101), (28, 0, 3, 201)]),
                     response_info(p, -1, [(28, 0, 99, 999)]),
                     response_info(p, -3, [(28, 0, 1, 999), (28, 1, 2, 999)]),
                 ]
@@ -358,7 +358,7 @@ async def test_late_duplicate_and_timeout_results_are_immutable(monkeypatch, ver
         await sent(peer)
         events.clear()
         if terminal == "complete":
-            peer.send(response_packet(peer.p, rows=[(29, 0, 7, 101), (28, 0, 3, 201)]))
+            peer.send(response_packet(peer.p, rows=[(12, 9, 7, 101), (28, 0, 3, 201)]))
         elif terminal == "reject":
             peer.send(response_packet(peer.p, result=1))
         retained = await operation.wait(2)
@@ -372,7 +372,7 @@ async def test_late_duplicate_and_timeout_results_are_immutable(monkeypatch, ver
             assert retained.response is None and retained.server_result is None
             assert_unknown_touched(bot, 9, 0)
         before = [(slot.state, slot.count, slot.stack_id) for slot in bot.get_player_inventory()]
-        await deliver(bot, peer, response_packet(peer.p, rows=[(29, 0, 1, 999), (28, 0, 9, 999)]))
+        await deliver(bot, peer, response_packet(peer.p, rows=[(12, 9, 1, 999), (28, 0, 9, 999)]))
         assert operation.result is retained and operation.phase == api.ItemOperationPhase.terminal
         assert [(slot.state, slot.count, slot.stack_id) for slot in bot.get_player_inventory()] == before
         assert len(request_events(events)) == 1 and len(requests(peer)) == 1

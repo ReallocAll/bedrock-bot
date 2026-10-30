@@ -77,16 +77,16 @@ async def test_stage_four_trade_three_return_one_and_exact_close(monkeypatch, ve
         request = await sent(peer)
         place = action(request.actions[0])
         assert "Place" in type(place).__name__ and place.amount == 4
-        assert wire_slot(side(place, "source")) == (29, 9, 101)
+        assert wire_slot(side(place, "source")) == (29, 0, 101)
         assert wire_slot(side(place, "destination")) == (47, 4, 0)
         peer.send(
-            response_packet(p, -1, [(29, 9, initial_count - 4, 101 if initial_count > 4 else 0), (47, 4, 4, 301)])
+            response_packet(p, -1, [(29, 0, initial_count - 4, 101 if initial_count > 4 else 0), (47, 4, 4, 301)])
         )
         retained.append((stage, await stage.wait(2)))
         trade = bot.begin_trade(quote.ref, output)
         assert bot.get_item(input_a).count == 4 and bot.get_item(output).count == 0
         await sent(peer, 2)
-        peer.send(response_packet(p, -3, [(47, 4, 1, 301), (29, 10, 1, 501)]))
+        peer.send(response_packet(p, -3, [(47, 4, 1, 301), (29, 1, 1, 501)]))
         retained.append((trade, await trade.wait(2)))
         residual = bot.get_item(input_a).count
         assert residual == 1
@@ -95,9 +95,9 @@ async def test_stage_four_trade_three_return_one_and_exact_close(monkeypatch, ve
         place = action(request.actions[0])
         assert "Place" in type(place).__name__ and place.amount == 1
         assert wire_slot(side(place, "source")) == (47, 4, 301)
-        assert wire_slot(side(place, "destination")) == (29, 9, 101 if initial_count > 4 else 0)
+        assert wire_slot(side(place, "destination")) == (29, 0, 101 if initial_count > 4 else 0)
         peer.send(
-            response_packet(p, -5, [(47, 4, 0, 0), (29, 9, initial_count - 3, 101 if initial_count > 4 else 401)])
+            response_packet(p, -5, [(47, 4, 0, 0), (29, 0, initial_count - 3, 101 if initial_count > 4 else 401)])
         )
         retained.append((returned, await returned.wait(2)))
         assert [request.client_request_id.raw_id for request in requests(peer)] == [-1, -3, -5]

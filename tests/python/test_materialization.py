@@ -83,7 +83,7 @@ async def test_owned_capture_copy_and_legacy_item_projection(monkeypatch, versio
         registry_iterator = iter(original.item_registry)
         operation = bot.begin_move_item(bot.player_slot(9), bot.player_slot(0), 3)
         await sent(peer)
-        peer.send(response_packet(peer.p, rows=[(29, 9, 7, 101), (28, 0, 3, 201)]))
+        peer.send(response_packet(peer.p, rows=[(29, 0, 7, 101), (28, 0, 3, 201)]))
         result = await operation.wait(2)
         assert result.touched_slots.to_list()[0]["item"]["stack_size"] == 7
         assert result.copy().key.bot is result.key.bot
@@ -113,7 +113,7 @@ async def test_versioned_payload_and_event_dictionaries(monkeypatch, version):
         assert set(event.to_dict()) == {"container", "reference", "server_closed"}
         operation = bot.begin_trade(offers.offers[0].ref, bot.player_slot(10))
         await sent(peer)
-        peer.send(response_packet(peer.p, rows=[(47, 4, 4, 301), (29, 10, 1, 501)]))
+        peer.send(response_packet(peer.p, rows=[(47, 4, 4, 301), (29, 1, 1, 501)]))
         result = await operation.wait(2)
         event = next(event for event in events if isinstance(event, api.ItemRequestEvent))
         assert set(event.to_dict()) == {"session_id", "request_id", "outcome", "response", "reason", "bot", "window"}

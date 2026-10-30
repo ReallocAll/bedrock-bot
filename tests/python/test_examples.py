@@ -173,7 +173,8 @@ async def test_behavior_example_combines_and_stops_independent_intents(monkeypat
             avoidance.stop()
             start = len(frames())
             await until(lambda: any(
-                p.move.y == 1 and has(p, "SNEAKING") and not has(p, "SPRINTING")
+                p.move.y == 1 and has(p, "SNEAKING") and has(p, "START_SNEAKING")
+                and has(p, "SNEAK_DOWN") and not has(p, "SPRINTING")
                 for p in frames()[start:]
             ))
 
@@ -183,6 +184,7 @@ async def test_behavior_example_combines_and_stops_independent_intents(monkeypat
             await until(lambda: any(
                 p.move.y == 0 and not has(p, "JUMPING")
                 and not has(p, "SPRINTING") and not has(p, "SNEAKING")
+                and has(p, "STOP_SNEAKING") and has(p, "SNEAK_RELEASED_RAW")
                 for p in frames()[start:]
             ))
 

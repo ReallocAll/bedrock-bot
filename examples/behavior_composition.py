@@ -51,6 +51,7 @@ class ActorAvoidance:
 class Posture:
     def __init__(self) -> None:
         self.mode: str | None = None
+        self._sent_mode: str | None = None
 
     def start(self, mode: str) -> None:
         if mode not in ("sprint", "sneak"):
@@ -59,6 +60,10 @@ class Posture:
 
     def stop(self) -> None:
         self.mode = None
+
+    def reset(self) -> None:
+        self.stop()
+        self._sent_mode = None
 
 
 def submit_input(bot, navigation: Navigation, avoidance: ActorAvoidance, posture: Posture) -> None:
@@ -70,13 +75,35 @@ def submit_input(bot, navigation: Navigation, avoidance: ActorAvoidance, posture
         bot.set_look(0, 0)
     else:
         bot.clear_look()
+    # BDS posture transitions require edge flags in addition to held flags.
+    active = (
+        "sneak" if posture.mode == "sneak" and status.alive
+        else "sprint" if posture.mode == "sprint" and moving
+        else None
+    )
+    flags = []
+    if posture._sent_mode != active:
+        if posture._sent_mode == "sprint":
+            flags.append("STOP_SPRINTING")
+        elif posture._sent_mode == "sneak":
+            flags.extend(("STOP_SNEAKING", "SNEAK_RELEASED_RAW"))
+        if active == "sprint":
+            flags.append("START_SPRINTING")
+        elif active == "sneak":
+            flags.extend(("START_SNEAKING", "SNEAK_PRESSED_RAW"))
+    if active == "sprint":
+        flags.append("SPRINT_DOWN")
+    elif active == "sneak":
+        flags.extend(("SNEAK_DOWN", "SNEAK_CURRENT_RAW", "WANT_DOWN"))
     bot.set_input(Input(
         position=status.position,
         move=Vec2(y=1 if moving else 0),
         jumping=blocked and status.alive,
-        sneaking=posture.mode == "sneak" and status.alive,
-        sprinting=posture.mode == "sprint" and moving,
+        sneaking=active == "sneak",
+        sprinting=active == "sprint",
+        flags=tuple(flags),
     ))
+    posture._sent_mode = active
 
 
 async def run_once(bot, navigation: Navigation, avoidance: ActorAvoidance, posture: Posture, seconds: float) -> None:
@@ -102,7 +129,7 @@ def subscribe_behaviors(runtime, bot, navigation: Navigation, avoidance: ActorAv
         if isinstance(event, StateEvent) and event.state in (BotState.closing, BotState.closed, BotState.failed):
             navigation.stop()
             avoidance.stop()
-            posture.stop()
+            posture.reset()
         elif isinstance(event, TickEvent):
             submit_input(bot, navigation, avoidance, posture)
 

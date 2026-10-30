@@ -1019,7 +1019,7 @@ class Session:
             y_head_rot=frame.yaw,
             input_data=flags,
             input_mode=p.InputMode.MOUSE,
-            play_mode=p.ClientPlayMode.SCREEN,
+            play_mode=p.ClientPlayMode.NORMAL,
             new_interaction_model=p.NewInteractionModel.CROSSHAIR,
             interact_rotation=rot,
             client_tick=tick,

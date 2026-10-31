@@ -151,3 +151,46 @@ async def test_correction_and_task_cancellation_release_intent():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert not nav._path
+
+
+@pytest.mark.asyncio
+async def test_route_block_update_invalidates_before_first_frame():
+    from types import SimpleNamespace
+    from endpilot import PacketDecodedEvent
+
+    bot = FakeBot()
+    world = KnownFlat()
+    world.bot = bot
+    nav = Navigator(bot, world)
+    task = asyncio.create_task(nav.goto(GoalNear(0, 100, 8)))
+    await asyncio.sleep(0)
+    assert nav.controller.state == "moving"
+    world.obstacles.add((0, 4))
+    packet = SimpleNamespace(header=SimpleNamespace(packet_id=21))
+    assert nav.on_event(PacketDecodedEvent(packet)) is None
+    assert nav.on_event(TickEvent(1, 0)) is None
+    with pytest.raises(NavigationError, match="path invalidated"):
+        await task
+    assert not nav._path
+    assert nav.controller.state == "coasting"
+
+
+@pytest.mark.asyncio
+async def test_new_goal_replaces_old_waiter_without_two_writers():
+    bot = FakeBot()
+    world = KnownFlat()
+    world.bot = bot
+    nav = Navigator(bot, world)
+    old = asyncio.create_task(nav.goto(GoalNear(8, 100, 0)))
+    await asyncio.sleep(0)
+    nav.on_event(TickEvent(1, 0))
+    new = asyncio.create_task(nav.goto(GoalNear(0, 100, 8)))
+    await asyncio.sleep(0)
+    with pytest.raises(NavigationError, match="stopped"):
+        await old
+    assert nav.last_plan.status == "complete"
+    assert nav._path and nav.controller.state == "moving"
+    new.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await new
+    assert not nav._path

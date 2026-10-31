@@ -276,7 +276,9 @@ class Navigator:
                 raise NavigationError(self.last_plan.status)
             self._path = self.last_plan.path
             self._next = 1
-            self._dirty = False
+            # Planning yields to the loop; a block update may have changed an
+            # already-expanded cell. Revalidate the entire route on first tick.
+            self._dirty = True
             if len(self._path) == 1:
                 return
             self._future = asyncio.get_running_loop().create_future()

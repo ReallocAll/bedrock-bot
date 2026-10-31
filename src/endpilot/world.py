@@ -162,23 +162,36 @@ class WorldQuery:
         self._session_id: int | None = None
         self._dimension: int | None = None
         self._hashes = False
+        self._publisher: tuple[int, int, int] | None = None
         self._slices: OrderedDict[tuple[int, int, int], _Slice] = OrderedDict()
 
     def clear(self) -> None:
         self._slices.clear()
+        self._publisher = None
 
     @property
     def observed_subchunks(self) -> int:
         return sum(item.layers is not None for item in self._slices.values())
 
+    def _inside_publisher(self, x: int, z: int) -> bool:
+        if self._publisher is None:
+            return True
+        px, pz, radius = self._publisher
+        # Radius is in blocks, unlike RequestChunkRadius's chunk units.
+        dx = max(x * 16 - px, px - (x * 16 + 15), 0)
+        dz = max(z * 16 - pz, pz - (z * 16 + 15), 0)
+        return dx * dx + dz * dz <= radius * radius
+
     def _set(self, key: tuple[int, int, int], slice_: _Slice) -> None:
+        if not self._inside_publisher(key[0], key[2]):
+            return
         self._slices[key] = slice_
         self._slices.move_to_end(key)
         if len(self._slices) > self.max_subchunks:
             self._slices.popitem(last=False)
 
     def _update(self, x: int, y: int, z: int, layer: int, runtime_id: int) -> None:
-        if layer not in (0, 1):
+        if layer not in (0, 1) or not self._inside_publisher(x // 16, z // 16):
             return
         key = (x // 16, y // 16, z // 16)
         slice_ = self._slices.get(key)
@@ -189,6 +202,10 @@ class WorldQuery:
 
     def observe(self, bot, event) -> None:
         if bot is not self.bot:
+            return
+        if isinstance(event, PacketDecodedEvent) and event.packet.header.packet_id not in (
+            11, 21, 61, 110, 121, 172, 174
+        ):
             return
         status = bot.get_status()
         if status.session_id != self._session_id:
@@ -216,6 +233,11 @@ class WorldQuery:
         elif packet_id == 61:
             self.clear()  # Clear before Session projects DimensionEvent.
             self._dimension = None
+        elif packet_id == 121 and self._hashes and self._dimension is not None:
+            self._publisher = (value.position.x, value.position.z, int(value.radius))
+            for key in tuple(self._slices):
+                if not self._inside_publisher(key[0], key[2]):
+                    del self._slices[key]
         elif packet_id == 174 and self._hashes and int(value.dimension_type) == self._dimension:
             if value.cache_enabled:
                 return  # No Blob manager: cached data is never presumed present.

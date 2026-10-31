@@ -108,17 +108,17 @@ can also request stop/release edge flags where the configured protocol supports
 them. Callers remain responsible for valid position/delta prediction; setting
 a flag does not promise server acceptance of a physical action.
 
-\`Input.position\` is the client's **predicted** position, not an independent
-BDS position observation; \`BotStatus.position\` can also reflect that prediction.
-\`Input.delta\` is the predicted **post-friction tick-end velocity**, not the
+`Input.position` is the client's **predicted** position, not an independent
+BDS position observation; `BotStatus.position` can also reflect that prediction.
+`Input.delta` is the predicted **post-friction tick-end velocity**, not the
 position difference across the tick. A motion controller must invalidate its
 prediction after a server correction, teleport, dimension change or Session
 replacement. Arrival must be checked independently against server authority.
 
-The internal \`endpilot._movement\` module offers a walking-only flat-ground
-\`MovementController\` and deterministic \`integrate_flat\` helper. Applications
+The internal `endpilot._movement` module offers a walking-only flat-ground
+`MovementController` and deterministic `integrate_flat` helper. Applications
 feed it subscribed events and submit its returned frame using their **existing
-single input writer**. \`predicted_arrival\` is not server-confirmed success;
+single input writer**. `predicted_arrival` is not server-confirmed success;
 correction fails closed until the caller verifies and explicitly restarts from
 a known grounded position. Sprint, Sneak, jump, water and complex collisions
 are outside this calibrated model.
